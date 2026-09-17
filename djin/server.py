@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -37,6 +39,14 @@ class ChatRequest(BaseModel):
 
 class DecisionRequest(BaseModel):
     approve: bool
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+def _sse(events: Iterator[dict[str, Any]]) -> Iterator[str]:
+    for event in events:
+        yield f"data: {json.dumps(event)}\n\n"
 
 
 @app.get("/")
@@ -82,6 +92,15 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/chat/stream")
+def chat_stream(request: ChatRequest) -> StreamingResponse:
+    try:
+        events = agent.stream_turn(request.conversation_id, request.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StreamingResponse(_sse(events), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
 @app.post("/api/actions/{action_id}/decision")
 def decide(action_id: str, request: DecisionRequest) -> dict[str, Any]:
     try:
@@ -90,6 +109,17 @@ def decide(action_id: str, request: DecisionRequest) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/actions/{action_id}/decision/stream")
+def decide_stream(action_id: str, request: DecisionRequest) -> StreamingResponse:
+    try:
+        events = agent.stream_resolution(action_id, request.approve)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return StreamingResponse(_sse(events), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.get("/api/conversations")

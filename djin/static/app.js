@@ -24,16 +24,74 @@ function scrollToEnd() {
 function addMessage(role, text) {
   const wrapper = el("div", `msg ${role}`);
   wrapper.appendChild(el("div", "who", role));
-  wrapper.appendChild(el("div", "body", text));
+  const body = el("div", "body");
+  if (role === "assistant") body.appendChild(renderMarkdown(text));
+  else body.textContent = text;
+  wrapper.appendChild(body);
   chat.appendChild(wrapper);
   scrollToEnd();
 }
 
-function addActivity(item) {
-  const node = el("div", "activity");
-  node.appendChild(el("span", `risk-${item.risk}`, `${item.tool} [${item.risk}]`));
-  node.appendChild(document.createTextNode(` ${item.status} · ${item.approval}`));
-  chat.appendChild(node);
+let stream = null;
+
+function beginAssistant() {
+  if (!stream) {
+    const wrapper = el("div", "msg assistant streaming");
+    wrapper.appendChild(el("div", "who", "assistant"));
+    const body = el("div", "body");
+    wrapper.appendChild(body);
+    chat.appendChild(wrapper);
+    stream = { wrapper, body, raw: "", frame: 0 };
+    scrollToEnd();
+  }
+  return stream;
+}
+
+function pushDelta(text) {
+  const target = beginAssistant();
+  target.raw += text;
+  if (target.frame) return;
+  // Re-render at most once per frame; markdown is reparsed from the full text each time.
+  target.frame = requestAnimationFrame(() => {
+    target.frame = 0;
+    target.body.replaceChildren(renderMarkdown(target.raw));
+    scrollToEnd();
+  });
+}
+
+function endAssistant() {
+  if (!stream) return;
+  if (stream.frame) cancelAnimationFrame(stream.frame);
+  if (stream.raw.trim()) {
+    stream.body.replaceChildren(renderMarkdown(stream.raw));
+    stream.wrapper.classList.remove("streaming");
+  } else {
+    stream.wrapper.remove();
+  }
+  stream = null;
+  scrollToEnd();
+}
+
+const activityRows = new Map();
+
+function upsertActivity(event) {
+  let node = event.status === "running" ? null : activityRows.get(event.tool);
+  if (!node) {
+    node = el("div", "activity");
+    chat.appendChild(node);
+    activityRows.set(event.tool, node);
+  }
+
+  node.replaceChildren();
+  node.appendChild(el("span", `risk-${event.risk}`, `${event.tool} [${event.risk}]`));
+  node.appendChild(
+    document.createTextNode(
+      event.status === "running"
+        ? " running…"
+        : ` ${event.status}${event.approval ? " · " + event.approval : ""}`
+    )
+  );
+  node.classList.toggle("running", event.status === "running");
   scrollToEnd();
 }
 
@@ -67,33 +125,74 @@ function setBusy(value) {
   sendButton.textContent = value ? "Working…" : "Send";
 }
 
-function handleResult(result) {
-  conversationId = result.conversation_id || conversationId;
-  (result.activity || []).forEach(addActivity);
-  if (result.reply) addMessage("assistant", result.reply);
-  if (result.error) addMessage("error", result.error);
-  renderApprovals(result.pending);
+function handleEvent(event) {
+  switch (event.type) {
+    case "start":
+      conversationId = event.conversation_id;
+      break;
+    case "delta":
+      pushDelta(event.content || "");
+      break;
+    case "message_end":
+      endAssistant();
+      break;
+    case "tool":
+      endAssistant();
+      upsertActivity(event);
+      break;
+    case "pending":
+      renderApprovals(event.actions);
+      break;
+    case "error":
+      endAssistant();
+      addMessage("error", event.message);
+      break;
+    case "done":
+      endAssistant();
+      break;
+  }
 }
 
-async function postJson(url, body) {
+async function streamRequest(url, payload) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
-  return data;
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `Request failed (${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop();
+    for (const frame of frames) {
+      const line = frame.split("\n").find((part) => part.startsWith("data:"));
+      if (line) handleEvent(JSON.parse(line.slice(5).trim()));
+    }
+  }
 }
 
 async function decide(actionId, approve) {
   if (busy) return;
+  renderApprovals([]);
   setBusy(true);
   try {
-    handleResult(await postJson(`/api/actions/${actionId}/decision`, { approve }));
+    await streamRequest(`/api/actions/${actionId}/decision/stream`, { approve });
   } catch (error) {
     addMessage("error", error.message);
   } finally {
+    endAssistant();
     setBusy(false);
   }
 }
@@ -105,12 +204,18 @@ form.addEventListener("submit", async (event) => {
 
   addMessage("user", message);
   input.value = "";
+  activityRows.clear();
+  renderApprovals([]);
   setBusy(true);
   try {
-    handleResult(await postJson("/api/chat", { message, conversation_id: conversationId }));
+    await streamRequest("/api/chat/stream", {
+      message,
+      conversation_id: conversationId,
+    });
   } catch (error) {
     addMessage("error", error.message);
   } finally {
+    endAssistant();
     setBusy(false);
     input.focus();
   }

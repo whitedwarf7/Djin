@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -169,50 +170,78 @@ def _handle_tool_call(call: dict[str, Any], conversation_id: str) -> tuple[ToolA
     return ToolActivity(spec.name, spec.risk.value, status, "auto", content[:200]), False
 
 
-def _run_loop(conversation_id: str) -> TurnResult:
+def _running_event(call: dict[str, Any]) -> dict[str, Any]:
+    name = (call.get("function") or {}).get("name", "")
+    spec = get_tool(name)
+    return {
+        "type": "tool",
+        "tool": name,
+        "risk": spec.risk.value if spec else "unknown",
+        "status": "running",
+        "approval": "",
+        "summary": "",
+    }
+
+
+def _stream_loop(conversation_id: str) -> Iterator[dict[str, Any]]:
     settings = get_settings()
-    result = TurnResult(conversation_id=conversation_id)
 
     try:
         client = LLMClient(settings)
     except LLMError as exc:
-        result.error = str(exc)
-        return result
+        yield {"type": "error", "message": str(exc)}
+        return
 
     for _ in range(settings.max_tool_iterations):
         if db.list_pending_actions(conversation_id):
-            result.pending = db.list_pending_actions(conversation_id)
-            return result
+            yield {"type": "pending", "actions": db.list_pending_actions(conversation_id)}
+            return
 
+        assistant: dict[str, Any] | None = None
         try:
-            assistant = client.chat(_api_messages(db.get_messages(conversation_id)), tool_schemas())
+            for event in client.stream_chat(
+                _api_messages(db.get_messages(conversation_id)), tool_schemas()
+            ):
+                if event["type"] == "delta":
+                    yield event
+                else:
+                    assistant = event["message"]
         except LLMError as exc:
-            result.error = str(exc)
-            return result
+            yield {"type": "error", "message": str(exc)}
+            return
+
+        if assistant is None:
+            yield {"type": "error", "message": "The model returned an empty response."}
+            return
 
         db.append_message(conversation_id, assistant)
+        yield {"type": "message_end"}
+
         tool_calls = assistant.get("tool_calls") or []
         if not tool_calls:
-            result.reply = assistant.get("content", "")
-            return result
+            return
 
         paused = False
         for call in tool_calls:
+            yield _running_event(call)
             activity, needs_approval = _handle_tool_call(call, conversation_id)
             if activity:
-                result.activity.append(activity)
+                yield {"type": "tool", **vars(activity)}
             paused = paused or needs_approval
 
         if paused:
-            result.pending = db.list_pending_actions(conversation_id)
-            result.reply = assistant.get("content", "")
-            return result
+            yield {"type": "pending", "actions": db.list_pending_actions(conversation_id)}
+            return
 
-    result.reply = "Stopped after reaching the maximum number of tool steps for this turn."
-    return result
+    yield {
+        "type": "delta",
+        "content": "Stopped after reaching the maximum number of tool steps for this turn.",
+    }
+    yield {"type": "message_end"}
 
 
-def start_turn(conversation_id: str | None, user_message: str) -> TurnResult:
+def stream_turn(conversation_id: str | None, user_message: str) -> Iterator[dict[str, Any]]:
+    """Validate before returning the generator so bad input fails before the response starts."""
     if not user_message.strip():
         raise ValueError("Message is empty.")
 
@@ -221,18 +250,27 @@ def start_turn(conversation_id: str | None, user_message: str) -> TurnResult:
     else:
         target = db.create_conversation(title=user_message[:60])
 
-    if db.list_pending_actions(target):
-        return TurnResult(
-            conversation_id=target,
-            pending=db.list_pending_actions(target),
-            error="Resolve the pending approval before sending another message.",
-        )
-
-    db.append_message(target, {"role": "user", "content": user_message})
-    return _run_loop(target)
+    return _stream_user_turn(target, user_message)
 
 
-def resolve_action(action_id: str, approve: bool) -> TurnResult:
+def _stream_user_turn(conversation_id: str, user_message: str) -> Iterator[dict[str, Any]]:
+    yield {"type": "start", "conversation_id": conversation_id}
+
+    if db.list_pending_actions(conversation_id):
+        yield {
+            "type": "error",
+            "message": "Resolve the pending approval before sending another message.",
+        }
+        yield {"type": "pending", "actions": db.list_pending_actions(conversation_id)}
+        yield {"type": "done"}
+        return
+
+    db.append_message(conversation_id, {"role": "user", "content": user_message})
+    yield from _stream_loop(conversation_id)
+    yield {"type": "done"}
+
+
+def stream_resolution(action_id: str, approve: bool) -> Iterator[dict[str, Any]]:
     action = db.get_pending_action(action_id)
     if action is None:
         raise KeyError(f"No such action: {action_id}")
@@ -241,17 +279,34 @@ def resolve_action(action_id: str, approve: bool) -> TurnResult:
     if not db.resolve_pending_action(action_id, "approved" if approve else "rejected"):
         raise ValueError("Action was already resolved.")
 
-    conversation_id = action["conversation_id"]
-    spec = get_tool(action["tool_name"])
-    activity: list[ToolActivity] = []
+    return _stream_resolution(action, approve)
 
+
+def _stream_resolution(action: dict[str, Any], approve: bool) -> Iterator[dict[str, Any]]:
+    conversation_id = action["conversation_id"]
+    yield {"type": "start", "conversation_id": conversation_id}
+
+    spec = get_tool(action["tool_name"])
     if spec is None:
         content = f"Unknown tool '{action['tool_name']}'."
     elif approve:
-        content, status = _execute(
-            spec, action["arguments"], conversation_id, approval="approved"
-        )
-        activity.append(ToolActivity(spec.name, spec.risk.value, status, "approved", content[:200]))
+        yield {
+            "type": "tool",
+            "tool": spec.name,
+            "risk": spec.risk.value,
+            "status": "running",
+            "approval": "approved",
+            "summary": "",
+        }
+        content, status = _execute(spec, action["arguments"], conversation_id, "approved")
+        yield {
+            "type": "tool",
+            "tool": spec.name,
+            "risk": spec.risk.value,
+            "status": status,
+            "approval": "approved",
+            "summary": content[:200],
+        }
     else:
         content = "The user rejected this action. Do not retry it unless they ask you to."
         db.log_audit(
@@ -262,19 +317,62 @@ def resolve_action(action_id: str, approve: bool) -> TurnResult:
             approval="rejected",
             status="skipped",
         )
-        activity.append(ToolActivity(spec.name, spec.risk.value, "skipped", "rejected", content))
+        yield {
+            "type": "tool",
+            "tool": spec.name,
+            "risk": spec.risk.value,
+            "status": "skipped",
+            "approval": "rejected",
+            "summary": content,
+        }
 
     db.append_message(
         conversation_id, _tool_message(action["tool_call_id"], action["tool_name"], content)
     )
 
     if db.list_pending_actions(conversation_id):
-        return TurnResult(
-            conversation_id=conversation_id,
-            pending=db.list_pending_actions(conversation_id),
-            activity=activity,
-        )
+        yield {"type": "pending", "actions": db.list_pending_actions(conversation_id)}
+        yield {"type": "done"}
+        return
 
-    result = _run_loop(conversation_id)
-    result.activity = activity + result.activity
+    yield from _stream_loop(conversation_id)
+    yield {"type": "done"}
+
+
+def _collect(events: Iterator[dict[str, Any]]) -> TurnResult:
+    """Drain the event stream into a single result for non-streaming callers."""
+    result = TurnResult(conversation_id="")
+    chunks: list[str] = []
+
+    for event in events:
+        kind = event.get("type")
+        if kind == "start":
+            result.conversation_id = event["conversation_id"]
+        elif kind == "delta":
+            chunks.append(event.get("content", ""))
+        elif kind == "tool" and event.get("status") != "running":
+            result.activity.append(
+                ToolActivity(
+                    event["tool"],
+                    event["risk"],
+                    event["status"],
+                    event.get("approval", ""),
+                    event.get("summary", ""),
+                )
+            )
+        elif kind == "pending":
+            result.pending = event["actions"]
+        elif kind == "error":
+            result.error = event["message"]
+
+    result.reply = "".join(chunks).strip()
     return result
+
+
+def start_turn(conversation_id: str | None, user_message: str) -> TurnResult:
+    return _collect(stream_turn(conversation_id, user_message))
+
+
+def resolve_action(action_id: str, approve: bool) -> TurnResult:
+    return _collect(stream_resolution(action_id, approve))
+
