@@ -1,0 +1,92 @@
+:root {
+  color-scheme: dark;
+  --bg: #12141a;
+  --panel: #1a1d26;
+  --border: #2b3040;
+  --text: #e6e8ef;
+  --muted: #8a90a4;
+  --accent: #6ea8fe;
+  --warn: #f5b971;
+  --danger: #f2777a;
+  --ok: #7fd1a1;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 "Segoe UI", system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+header h1 { font-size: 18px; margin: 0; letter-spacing: 0.06em; }
+
+.status { font-size: 12px; color: var(--muted); text-align: right; }
+.status .bad { color: var(--danger); }
+.status .good { color: var(--ok); }
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 16px;
+  gap: 12px;
+  min-height: 0;
+}
+
+.chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 6px; }
+
+.msg { padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border); white-space: pre-wrap; word-wrap: break-word; }
+.msg.user { background: #1d2740; border-color: #2c3c61; align-self: flex-end; max-width: 80%; }
+.msg.assistant { background: var(--panel); align-self: flex-start; max-width: 90%; }
+.msg.error { background: #2a1b1d; border-color: #5a2f33; color: #ffbfc1; }
+.msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px; }
+
+.activity { font-size: 12px; color: var(--muted); border-left: 2px solid var(--border); padding: 2px 10px; align-self: flex-start; }
+.activity .risk-read { color: var(--muted); }
+.activity .risk-write { color: var(--warn); }
+.activity .risk-external, .activity .risk-destructive { color: var(--danger); }
+
+.approvals { border: 1px solid var(--warn); border-radius: 10px; padding: 12px; background: #221c14; }
+.approvals h2 { margin: 0 0 8px; font-size: 14px; color: var(--warn); }
+.approval { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
+.approval:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.approval pre { white-space: pre-wrap; background: #14161d; border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 6px 0; font: 13px/1.5 Consolas, monospace; }
+.approval .meta { font-size: 12px; color: var(--muted); }
+.approval .buttons { display: flex; gap: 8px; }
+
+.composer { display: flex; gap: 8px; }
+textarea {
+  flex: 1; resize: vertical; padding: 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  font: inherit;
+}
+textarea:focus, button:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+button {
+  border: 1px solid var(--border); background: #253154; color: var(--text);
+  border-radius: 8px; padding: 8px 16px; cursor: pointer; font: inherit;
+}
+button:hover:not(:disabled) { background: #2e3d68; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.approve { background: #1f4434; border-color: #2f6b51; }
+button.reject { background: #4a2326; border-color: #74383c; }
+
+.hidden { display: none; }
