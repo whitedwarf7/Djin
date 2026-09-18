@@ -125,25 +125,90 @@ def _fetch_messages(service: Any, ids: list[str], fmt: str = "metadata") -> list
     return result
 
 
-def _list_ids(service: Any, query: str, limit: int) -> list[str]:
+def _list_ids(
+    service: Any, query: str, limit: int, include_spam_trash: bool = False
+) -> list[str]:
+    """Pages until `limit` is reached; one page tops out at 500 regardless of maxResults."""
+    ids: list[str] = []
+    page_token: str | None = None
+    try:
+        while len(ids) < limit:
+            listing = (
+                service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=query,
+                    maxResults=min(limit - len(ids), 500),
+                    includeSpamTrash=include_spam_trash,
+                    pageToken=page_token,
+                    fields="messages/id,nextPageToken",
+                )
+                .execute()
+            )
+            ids.extend(item["id"] for item in listing.get("messages", []) if item.get("id"))
+            page_token = listing.get("nextPageToken")
+            if not page_token:
+                break
+    except HttpError as exc:
+        raise _api_error(exc) from exc
+    return ids[:limit]
+
+
+def _estimate(service: Any, query: str, include_spam_trash: bool = False) -> int:
     try:
         listing = (
             service.users()
             .messages()
-            .list(userId="me", q=query, maxResults=limit, fields="messages/id")
+            .list(
+                userId="me",
+                q=query,
+                maxResults=1,
+                includeSpamTrash=include_spam_trash,
+                fields="resultSizeEstimate",
+            )
             .execute()
         )
-    except HttpError as exc:
-        raise _api_error(exc) from exc
-    return [item["id"] for item in listing.get("messages", []) if item.get("id")]
+    except HttpError:
+        return 0
+    return int(listing.get("resultSizeEstimate") or 0)
 
 
 # --------------------------------------------------------------------------- query building
 
 
-def _term(value: str) -> str:
+def _quote(value: str) -> str:
     value = value.strip()
     return f'"{value}"' if " " in value else value
+
+
+def _field(name: str, value: str) -> str:
+    """`subject:(credit card)` needs both words but in any order. Only a value the caller
+    already quoted stays an exact phrase, which is what most real subjects fail to be."""
+    value = value.strip()
+    if len(value) > 1 and value.startswith('"') and value.endswith('"'):
+        return f"{name}:{value}"
+    return f"{name}:({value})" if " " in value else f"{name}:{value}"
+
+
+def _any_field(name: str, values: list[str]) -> str:
+    alternatives = [_quote(value) for value in values if value and value.strip()]
+    return f"{name}:({' OR '.join(alternatives)})" if alternatives else ""
+
+
+DATE_RE = re.compile(r"^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$")
+
+
+def _date(value: str, field: str) -> str:
+    match = DATE_RE.match(value.strip())
+    if not match:
+        raise ToolError(f"{field} must look like 2026-01-31.")
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        datetime(year, month, day)
+    except ValueError as exc:
+        raise ToolError(f"{field} is not a real date.") from exc
+    return f"{year:04d}/{month:02d}/{day:02d}"
 
 
 def _clamp_days(value: int | None, field: str) -> int | None:
@@ -155,11 +220,13 @@ def _clamp_days(value: int | None, field: str) -> int | None:
     return min(days, 3650)
 
 
-def _build_query(
+def _query_terms(
     query: str | None = None,
     sender: str | None = None,
+    sender_any: list[str] | None = None,
     recipient: str | None = None,
     subject: str | None = None,
+    subject_any: list[str] | None = None,
     label: str | None = None,
     category: str | None = None,
     is_unread: bool | None = None,
@@ -167,48 +234,114 @@ def _build_query(
     has_attachment: bool | None = None,
     newer_than_days: int | None = None,
     older_than_days: int | None = None,
+    after: str | None = None,
+    before: str | None = None,
     exclude_senders: list[str] | None = None,
     exclude_noise: bool = False,
-) -> str:
-    terms: list[str] = []
+) -> list[tuple[str, str]]:
+    """Labelled terms, so a search that finds nothing can report which filter to relax."""
+    terms: list[tuple[str, str]] = []
+
+    def add(name: str, term: str) -> None:
+        if term:
+            terms.append((name, term))
 
     if query and query.strip():
-        terms.append(query.strip())
+        add("query", query.strip())
     if sender:
-        terms.append(f"from:{_term(sender)}")
+        add("sender", _field("from", sender))
+    add("sender_any", _any_field("from", sender_any or []))
     if recipient:
-        terms.append(f"to:{_term(recipient)}")
+        add("recipient", _field("to", recipient))
     if subject:
-        terms.append(f"subject:{_term(subject)}")
+        add("subject", _field("subject", subject))
+    add("subject_any", _any_field("subject", subject_any or []))
     if label:
-        terms.append(f"label:{_term(label)}")
+        add("label", f"label:{_quote(label)}")
 
     if category:
         normalised = category.strip().lower()
         if normalised not in CATEGORIES:
             raise ToolError(f"category must be one of: {', '.join(CATEGORIES)}")
-        terms.append(f"category:{normalised}")
+        add("category", f"category:{normalised}")
 
     if is_unread is not None:
-        terms.append("is:unread" if is_unread else "is:read")
+        add("is_unread", "is:unread" if is_unread else "is:read")
     if is_important:
-        terms.append("is:important")
+        add("is_important", "is:important")
     if has_attachment:
-        terms.append("has:attachment")
+        add("has_attachment", "has:attachment")
 
     if days := _clamp_days(newer_than_days, "newer_than_days"):
-        terms.append(f"newer_than:{days}d")
+        add("newer_than_days", f"newer_than:{days}d")
     if days := _clamp_days(older_than_days, "older_than_days"):
-        terms.append(f"older_than:{days}d")
+        add("older_than_days", f"older_than:{days}d")
+    if after:
+        add("after", f"after:{_date(after, 'after')}")
+    if before:
+        add("before", f"before:{_date(before, 'before')}")
 
     for address in exclude_senders or []:
         if address.strip():
-            terms.append(f"-from:{_term(address)}")
+            add("exclude_senders", f"-from:{_quote(address)}")
 
     if exclude_noise:
-        terms.extend(f"-category:{name}" for name in NOISE_CATEGORIES if name != category)
+        for name in NOISE_CATEGORIES:
+            if name != category:
+                add("exclude_noise", f"-category:{name}")
 
-    return " ".join(terms) if terms else "in:inbox"
+    return terms
+
+
+def _build_query(**filters: Any) -> str:
+    terms = _query_terms(**filters)
+    return " ".join(term for _, term in terms) if terms else "in:inbox"
+
+
+MAX_PROBES = 6
+TIME_LABELS = frozenset({"newer_than_days", "older_than_days", "after", "before"})
+
+
+def _why_empty(
+    service: Any, terms: list[tuple[str, str]], include_spam_trash: bool
+) -> str:
+    """Gmail never says why a query missed, so probe it: drop one filter at a time and
+    report which single term is responsible instead of leaving the model guessing."""
+    full = " ".join(term for _, term in terms)
+    hints: list[str] = []
+
+    if full and not include_spam_trash and _estimate(service, full, True):
+        hints.append("- matches exist in Spam/Trash; retry with include_spam_trash=true")
+
+    labels = list(dict.fromkeys(name for name, _ in terms))
+    for label in labels[:MAX_PROBES]:
+        reduced = " ".join(term for name, term in terms if name != label)
+        if not reduced:
+            continue
+        if count := _estimate(service, reduced, include_spam_trash):
+            hints.append(f"- without `{label}` about {count} message(s) match")
+
+    if hints:
+        return (
+            "That filter combination is too narrow. Relaxing it:\n"
+            + "\n".join(hints)
+            + "\nRetry with the named filter dropped, or widen the wording via subject_any."
+        )
+
+    # Two filters can each be fatal on their own, in which case dropping them one at a
+    # time proves nothing. Check the time window alone before declaring the mail absent.
+    narrowing = [name for name in labels if name not in TIME_LABELS]
+    if narrowing:
+        window = " ".join(term for name, term in terms if name in TIME_LABELS)
+        if count := _estimate(service, window, include_spam_trash):
+            listed = ", ".join(f"`{name}`" for name in narrowing)
+            return (
+                f"About {count} message(s) exist in that time window, so {listed} together"
+                " excluded every one of them. Drop all of those filters, then narrow again"
+                " from what comes back."
+            )
+
+    return "Relaxing each filter in turn still matches nothing, so the mailbox has none."
 
 
 # --------------------------------------------------------------------------- body cleaning
@@ -447,8 +580,27 @@ SEARCH_FILTERS: dict[str, Any] = {
         "description": "Extra raw Gmail query terms for anything the filters cannot express.",
     },
     "sender": {"type": "string", "description": "Match the From address or name."},
+    "sender_any": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Match any one of these senders, e.g. ['hdfc', 'icici', 'amex'].",
+    },
     "recipient": {"type": "string", "description": "Match the To address."},
-    "subject": {"type": "string", "description": "Words that must appear in the subject."},
+    "subject": {
+        "type": "string",
+        "description": (
+            "Words that must ALL appear in the subject, in any order."
+            " Wrap in quotes to demand an exact phrase."
+        ),
+    },
+    "subject_any": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "Match a subject containing ANY one of these. Prefer this over `subject`"
+            " whenever the exact wording is unknown."
+        ),
+    },
     "label": {"type": "string", "description": "Gmail label name, e.g. 'inbox' or 'Work'."},
     "category": {
         "type": "string",
@@ -460,6 +612,8 @@ SEARCH_FILTERS: dict[str, Any] = {
     "has_attachment": {"type": "boolean", "description": "Only messages with attachments."},
     "newer_than_days": {"type": "integer", "description": "Only messages from the last N days."},
     "older_than_days": {"type": "integer", "description": "Only messages older than N days."},
+    "after": {"type": "string", "description": "On or after this date, as 2026-01-31."},
+    "before": {"type": "string", "description": "Before this date, as 2026-01-31."},
     "exclude_senders": {
         "type": "array",
         "items": {"type": "string"},
@@ -468,6 +622,11 @@ SEARCH_FILTERS: dict[str, Any] = {
     "exclude_noise": {
         "type": "boolean",
         "description": "Drop the promotions, social and forums categories.",
+        "default": False,
+    },
+    "include_spam_trash": {
+        "type": "boolean",
+        "description": "Also search Spam and Trash. Bank and billing mail often lands there.",
         "default": False,
     },
 }
@@ -481,6 +640,12 @@ SEARCH_FILTERS: dict[str, Any] = {
         " Combine sender, subject, label, category, unread state and age;"
         " use `query` only for terms the filters do not cover."
         " Returns one compact line per message, newest first, with the id needed to read it."
+        " Senders word things differently, so for bills, statements, invoices, receipts or"
+        " orders use `subject_any` with several wordings rather than one guessed phrase."
+        " Do not narrow by category or label unless asked: statements are usually filed"
+        " under Updates or Promotions and are often already archived."
+        " A search that matches nothing reports which filter to relax; act on that instead"
+        " of concluding the mail does not exist."
     ),
     parameters={
         "type": "object",
@@ -493,8 +658,11 @@ SEARCH_FILTERS: dict[str, Any] = {
             },
             "max_results": {
                 "type": "integer",
-                "description": "How many messages to return (1-50).",
-                "default": 15,
+                "description": (
+                    "How many messages to return (1-100). Raise it for questions that span"
+                    " months, where the default will silently cut the range short."
+                ),
+                "default": 25,
             },
         },
     },
@@ -505,8 +673,10 @@ SEARCH_FILTERS: dict[str, Any] = {
 def gmail_search(
     query: str | None = None,
     sender: str | None = None,
+    sender_any: list[str] | None = None,
     recipient: str | None = None,
     subject: str | None = None,
+    subject_any: list[str] | None = None,
     label: str | None = None,
     category: str | None = None,
     is_unread: bool | None = None,
@@ -514,16 +684,21 @@ def gmail_search(
     has_attachment: bool | None = None,
     newer_than_days: int | None = None,
     older_than_days: int | None = None,
+    after: str | None = None,
+    before: str | None = None,
     exclude_senders: list[str] | None = None,
     exclude_noise: bool = False,
+    include_spam_trash: bool = False,
     include_snippets: bool = True,
-    max_results: int = 15,
+    max_results: int = 25,
 ) -> str:
-    search = _build_query(
+    terms = _query_terms(
         query=query,
         sender=sender,
+        sender_any=sender_any,
         recipient=recipient,
         subject=subject,
+        subject_any=subject_any,
         label=label,
         category=category,
         is_unread=is_unread,
@@ -531,20 +706,32 @@ def gmail_search(
         has_attachment=has_attachment,
         newer_than_days=newer_than_days,
         older_than_days=older_than_days,
+        after=after,
+        before=before,
         exclude_senders=exclude_senders,
         exclude_noise=exclude_noise,
     )
+    search = " ".join(term for _, term in terms) if terms else "in:inbox"
 
     service = gmail_service()
-    ids = _list_ids(service, search, max(1, min(int(max_results), 50)))
+    limit = max(1, min(int(max_results), 100))
+    ids = _list_ids(service, search, limit, include_spam_trash)
     if not ids:
-        return f"No messages matched: {search}"
+        return (
+            f"No messages matched: {search}\n"
+            f"{_why_empty(service, terms, include_spam_trash)}"
+        )
 
     messages = [_summarise(message) for message in _fetch_messages(service, ids, "metadata")]
     messages.sort(key=lambda message: message["timestamp"], reverse=True)
     unread = sum(1 for message in messages if message["unread"])
 
     header = f"query: {search}\n{len(messages)} message(s), {unread} unread"
+    if len(ids) == limit:
+        header += (
+            f"\nCut off at max_results={limit}; older matches exist."
+            " Raise max_results or narrow the window with before/after."
+        )
     body = "\n".join(_message_line(message, include_snippets) for message in messages)
     return wrap_untrusted("gmail_search", f"{header}\n{body}")
 
