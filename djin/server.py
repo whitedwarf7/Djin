@@ -8,18 +8,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from djin import agent
+from djin import agent, voice
 from djin.config import get_settings
 from djin.integrations import google_auth, reddit_auth
 from djin.storage import db
 from djin.tools import REGISTRY
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+MAX_TTS_CHARS = voice.MAX_TTS_CHARS
 
 
 @asynccontextmanager
@@ -35,10 +36,18 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=20000)
     conversation_id: str | None = None
+    voice: bool = False
 
 
 class DecisionRequest(BaseModel):
     approve: bool
+    voice: bool = False
+
+
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=MAX_TTS_CHARS)
+    voice: str | None = Field(default=None, max_length=64)
+    format: str = "mp3"
 
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -77,6 +86,7 @@ def status() -> dict[str, Any]:
             },
             "notes": {"configured": True, "path": str(settings.notes_dir)},
         },
+        "voice": voice.client_config(settings),
         "tools": [
             {"name": spec.name, "risk": spec.risk.value, "description": spec.description}
             for spec in REGISTRY.values()
@@ -95,7 +105,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
 @app.post("/api/chat/stream")
 def chat_stream(request: ChatRequest) -> StreamingResponse:
     try:
-        events = agent.stream_turn(request.conversation_id, request.message)
+        events = agent.stream_turn(request.conversation_id, request.message, request.voice)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StreamingResponse(_sse(events), media_type="text/event-stream", headers=SSE_HEADERS)
@@ -114,12 +124,49 @@ def decide(action_id: str, request: DecisionRequest) -> dict[str, Any]:
 @app.post("/api/actions/{action_id}/decision/stream")
 def decide_stream(action_id: str, request: DecisionRequest) -> StreamingResponse:
     try:
-        events = agent.stream_resolution(action_id, request.approve)
+        events = agent.stream_resolution(action_id, request.approve, request.voice)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return StreamingResponse(_sse(events), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.get("/api/voice/config")
+def voice_config() -> dict[str, Any]:
+    return voice.client_config()
+
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(
+    audio: UploadFile = File(...),
+    language: str | None = Form(default=None),
+) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.voice_enabled:
+        raise HTTPException(status_code=403, detail="Voice is disabled.")
+
+    payload = await audio.read(settings.max_audio_bytes + 1)
+    if len(payload) > settings.max_audio_bytes:
+        raise HTTPException(status_code=413, detail="Audio clip is too large.")
+    try:
+        return {"text": voice.transcribe(payload, audio.content_type or "", language, settings)}
+    except voice.VoiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/voice/speak")
+def voice_speak(request: SpeakRequest) -> Response:
+    settings = get_settings()
+    if not settings.voice_enabled:
+        raise HTTPException(status_code=403, detail="Voice is disabled.")
+    try:
+        audio, media_type = voice.synthesise(
+            request.text, request.voice, request.format, settings
+        )
+    except voice.VoiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=audio, media_type=media_type, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/conversations")

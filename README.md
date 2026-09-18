@@ -13,6 +13,7 @@ leave it — only your prompts and the content you ask Djin to work with go to t
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
 - [Running Djin](#running-djin)
+- [Talking to Djin](#talking-to-djin)
 - [Things to try](#things-to-try)
 - [Available tools](#available-tools)
 - [Approvals and safety](#approvals-and-safety)
@@ -52,6 +53,9 @@ contacts" is presented as data, not as a command.
 Replies stream token by token over server-sent events and are rendered as Markdown — headings,
 tables, lists, links and code blocks. The renderer builds DOM nodes directly and never uses
 `innerHTML`, so text quoted from an email or web page cannot inject markup into the UI.
+
+You can also hold a spoken conversation with Djin. By default speech is captured and played
+back by the browser itself, so no audio leaves the machine.
 
 ## Requirements
 
@@ -181,6 +185,25 @@ Notes are plain Markdown files in `data/notes`. To sync them, point the folder a
 DJIN_NOTES_DIR=C:\Users\you\OneDrive\DjinNotes
 ```
 
+### 6. Voice (optional)
+
+Voice works out of the box in Chrome and Edge with no extra configuration: the page uses the
+browser's own speech recognition and speech synthesis.
+
+If your browser has no speech recognition (Firefox), or you want better accuracy and a nicer
+voice, route speech through an OpenAI-compatible audio API instead:
+
+```ini
+DJIN_STT_PROVIDER=openai
+DJIN_TTS_PROVIDER=openai
+DJIN_VOICE_API_KEY=sk-...
+DJIN_TTS_VOICE=alloy
+DJIN_VOICE_LANGUAGE=en-GB
+```
+
+`DJIN_VOICE_BASE_URL` can point at any OpenAI-compatible server, including a local Whisper
+instance, so audio need not leave the machine.
+
 ### All settings
 
 | Variable | Default | Purpose |
@@ -195,6 +218,14 @@ DJIN_NOTES_DIR=C:\Users\you\OneDrive\DjinNotes
 | `DJIN_BRAVE_API_KEY` / `DJIN_TAVILY_API_KEY` | – | Search key |
 | `DJIN_NOTES_DIR` | `data/notes` | Notes vault location |
 | `DJIN_AUTO_APPROVE_WRITE` | `true` | Set `false` to confirm drafts and notes too |
+| `DJIN_VOICE_ENABLED` | `true` | Set `false` to hide the voice controls |
+| `DJIN_STT_PROVIDER` | `browser` | `browser` or `openai` |
+| `DJIN_TTS_PROVIDER` | `browser` | `browser` or `openai` |
+| `DJIN_VOICE_BASE_URL` | `https://api.openai.com/v1` | Any OpenAI-compatible audio API |
+| `DJIN_VOICE_API_KEY` | falls back to the OpenAI key | Key for the audio API |
+| `DJIN_STT_MODEL` / `DJIN_TTS_MODEL` | `whisper-1` / `gpt-4o-mini-tts` | Server speech models |
+| `DJIN_TTS_VOICE` | `alloy` | Synthesised voice name |
+| `DJIN_VOICE_LANGUAGE` | `en-US` | Recognition and playback language |
 | `DJIN_HOST` / `DJIN_PORT` | `127.0.0.1` / `8765` | Server binding |
 | `DJIN_ENCRYPTION_KEY` | auto | Fernet key; generated into `data/secret.key` if empty |
 
@@ -212,9 +243,29 @@ DJIN_NOTES_DIR=C:\Users\you\OneDrive\DjinNotes
 Stop the server with `Ctrl+C`. The status bar at the top of the UI shows a tick or a cross for
 each integration.
 
+## Talking to Djin
+
+Above the message box are the voice controls.
+
+| Control | What it does |
+| --- | --- |
+| **Talk** (or `Ctrl+Space`) | Start listening. Recording stops on its own when you stop speaking. Press again to cancel. |
+| **Hands-free** | Keep the conversation going: Djin listens again as soon as it has finished speaking. |
+| **Speak replies** | Turn spoken output on or off without leaving voice input. |
+| `Esc` | Stop speaking, stop listening and leave hands-free mode. |
+
+When a turn starts from your voice, Djin is told its answer will be read aloud, so it replies
+in short spoken sentences without markdown, lists or URLs. Typed turns are unaffected.
+Pressing **Talk** while Djin is speaking interrupts it.
+
+Approvals are never granted by voice. If a turn needs approval, Djin says so, leaves hands-free
+mode and waits for you to click **Approve** or **Reject**.
+
 ## Things to try
 
 - "Summarise my unread emails from this week."
+- "What did I miss in my inbox today, ignoring newsletters?"
+- "Catch me up on the thread about the migration."
 - "What's on my calendar tomorrow?"
 - "Find me a free 45-minute slot on Friday afternoon."
 - "What's trending in r/LocalLLaMA today? Save the interesting ones to a note."
@@ -225,11 +276,18 @@ each integration.
 
 | Group | Tools |
 | --- | --- |
-| Gmail | `gmail_search`, `gmail_read_message`, `gmail_create_draft` |
+| Gmail | `gmail_search`, `gmail_digest`, `gmail_read_message`, `gmail_read_thread`, `gmail_create_draft` |
 | Calendar | `calendar_list_events`, `calendar_find_free_slots`, `calendar_create_event` |
 | Web | `web_search`, `fetch_url` |
 | Reddit | `reddit_browse`, `reddit_post_comments`, `reddit_saved` |
 | Notes | `notes_create`, `notes_append`, `notes_list`, `notes_search` |
+
+The Gmail tools are built to keep mail cheap to read. `gmail_search` takes structured filters
+(sender, subject, label, category, unread, age, excluded senders) instead of hand-written query
+syntax, `gmail_digest` groups a whole mailbox into conversations and collapses newsletters to
+one line per sender, and `gmail_read_thread` returns an entire conversation in a single API
+call. Message fetches are batched into one HTTP round trip, briefly cached, and bodies are
+stripped of quoted replies, signatures and legal footers before the model ever sees them.
 
 ## Approvals and safety
 
@@ -250,10 +308,11 @@ Djin/
 │  ├─ config.py             # settings loaded from .env
 │  ├─ llm.py                # OpenAI-compatible client (OpenAI + OpenRouter)
 │  ├─ server.py             # FastAPI app and HTTP API
+│  ├─ voice.py              # optional server-side speech-to-text and text-to-speech
 │  ├─ integrations/         # Google and Reddit OAuth
 │  ├─ storage/              # SQLite database and encrypted token vault
-│  ├─ static/               # chat UI
-│  └─ tools/                # the 15 tools, grouped by service
+│  ├─ static/               # chat and voice UI
+│  └─ tools/                # the 17 tools, grouped by service
 ├─ data/                    # database, notes, encryption key (git-ignored)
 ├─ .env                     # your secrets (git-ignored)
 ├─ .env.example             # template
@@ -288,10 +347,20 @@ not allowed to reach your local network.
 **The model ignores the tools** — the model must support tool calling. `gpt-4o-mini` is a safe
 default.
 
+**The voice controls say the browser has no speech recognition** — only Chromium-based browsers
+implement it. Use Chrome or Edge, or set `DJIN_STT_PROVIDER=openai` with `DJIN_VOICE_API_KEY`.
+
+**The microphone is blocked** — browsers only grant microphone access on `localhost` or HTTPS.
+Open Djin at <http://127.0.0.1:8765> and allow the permission prompt.
+
 ## Security notes
 
 - OAuth tokens are encrypted at rest with Fernet. The key lives in `data/secret.key`, which is
   git-ignored; losing it just means signing in again.
+- With the default voice settings, audio is captured and played entirely inside the browser and
+  is never uploaded. Setting `DJIN_STT_PROVIDER` or `DJIN_TTS_PROVIDER` to `openai` sends audio
+  to `DJIN_VOICE_BASE_URL`.
+- Voice can start a turn but can never approve one; approvals always require a click.
 - `fetch_url` refuses private, loopback and link-local addresses and re-checks every redirect
   hop, so the model cannot reach your router or localhost services.
 - The chat UI renders all text as plain text, so retrieved content cannot inject markup.

@@ -151,6 +151,7 @@ function handleEvent(event) {
       endAssistant();
       break;
   }
+  DjinVoice.handleEvent(event);
 }
 
 async function streamRequest(url, payload) {
@@ -188,37 +189,47 @@ async function decide(actionId, approve) {
   renderApprovals([]);
   setBusy(true);
   try {
-    await streamRequest(`/api/actions/${actionId}/decision/stream`, { approve });
-  } catch (error) {
-    addMessage("error", error.message);
-  } finally {
-    endAssistant();
-    setBusy(false);
-  }
-}
-
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const message = input.value.trim();
-  if (!message || busy) return;
-
-  addMessage("user", message);
-  input.value = "";
-  activityRows.clear();
-  renderApprovals([]);
-  setBusy(true);
-  try {
-    await streamRequest("/api/chat/stream", {
-      message,
-      conversation_id: conversationId,
+    await streamRequest(`/api/actions/${actionId}/decision/stream`, {
+      approve,
+      voice: DjinVoice.isVoiceTurn(),
     });
   } catch (error) {
     addMessage("error", error.message);
   } finally {
     endAssistant();
     setBusy(false);
-    input.focus();
+    DjinVoice.turnEnded();
   }
+}
+
+async function sendMessage(message, spoken) {
+  if (!message || busy) return;
+
+  addMessage("user", message);
+  input.value = "";
+  activityRows.clear();
+  renderApprovals([]);
+  DjinVoice.setVoiceTurn(Boolean(spoken));
+  setBusy(true);
+  try {
+    await streamRequest("/api/chat/stream", {
+      message,
+      conversation_id: conversationId,
+      voice: Boolean(spoken),
+    });
+  } catch (error) {
+    addMessage("error", error.message);
+  } finally {
+    endAssistant();
+    setBusy(false);
+    DjinVoice.turnEnded();
+    if (!spoken) input.focus();
+  }
+}
+
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  sendMessage(input.value.trim(), false);
 });
 
 input.addEventListener("keydown", (event) => {
@@ -249,4 +260,5 @@ async function loadStatus() {
 }
 
 loadStatus();
+DjinVoice.init({ send: sendMessage, isBusy: () => busy });
 input.focus();

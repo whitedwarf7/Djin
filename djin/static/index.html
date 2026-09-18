@@ -20,6 +20,13 @@
       <div id="approval-list"></div>
     </section>
 
+    <div id="voice-bar" class="voice-bar hidden">
+      <button type="button" id="mic" class="mic" aria-pressed="false" title="Talk (Ctrl+Space)">Talk</button>
+      <label class="toggle"><input type="checkbox" id="hands-free" /> Hands-free</label>
+      <label class="toggle"><input type="checkbox" id="speak-replies" checked /> Speak replies</label>
+      <span id="voice-status" class="voice-status" aria-live="polite"></span>
+    </div>
+
     <form id="composer" class="composer">
       <textarea id="input" rows="3" placeholder="Ask Djin… (Enter to send, Shift+Enter for a new line)"></textarea>
       <button type="submit" id="send">Send</button>
@@ -27,6 +34,7 @@
   </main>
 
   <script src="/static/markdown.js"></script>
+  <script src="/static/voice.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
