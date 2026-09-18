@@ -48,7 +48,7 @@ function messageShell(role, label) {
   const wrapper = el("div", `msg ${role}`);
   if (role === "assistant") {
     const mark = el("span", "mark");
-    mark.appendChild(icon("flame"));
+    mark.appendChild(icon("lamp"));
     wrapper.appendChild(mark);
   }
   wrapper.appendChild(el("span", "sr-only", label));
@@ -392,7 +392,7 @@ function suggestionsFor(data) {
 function renderEmptyState(suggestions) {
   const box = el("div", "empty");
   const mark = el("div", "empty-mark");
-  mark.appendChild(icon("flame"));
+  mark.appendChild(icon("lamp"));
   box.append(
     mark,
     el("h2", null, "What should I dig into?"),
