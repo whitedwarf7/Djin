@@ -39,6 +39,15 @@ Rules you must follow:
 Current local time: {now} ({timezone}).
 """
 
+VOICE_STYLE = """
+The user is speaking to you and your reply will be read aloud by a speech synthesiser.
+Answer in short spoken sentences. Do not use markdown, headings, bullet lists, tables,
+code blocks, emoji or raw URLs, because they cannot be pronounced. Give at most three
+points, then offer to put the details on screen if there is more. Say dates, times and
+numbers the way a person would say them. If a word came through misheard, ask a short
+clarifying question instead of guessing.
+"""
+
 
 @dataclass
 class ToolActivity:
@@ -67,18 +76,18 @@ class TurnResult:
         }
 
 
-def _system_message() -> dict[str, str]:
+def _system_message(voice: bool = False) -> dict[str, str]:
     now = datetime.now().astimezone()
-    return {
-        "role": "system",
-        "content": SYSTEM_PROMPT.format(
-            now=now.strftime("%Y-%m-%d %H:%M"), timezone=now.tzname() or "local time"
-        ),
-    }
+    content = SYSTEM_PROMPT.format(
+        now=now.strftime("%Y-%m-%d %H:%M"), timezone=now.tzname() or "local time"
+    )
+    if voice:
+        content += VOICE_STYLE
+    return {"role": "system", "content": content}
 
 
-def _api_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    messages = [_system_message()]
+def _api_messages(history: list[dict[str, Any]], voice: bool = False) -> list[dict[str, Any]]:
+    messages = [_system_message(voice)]
     for stored in history:
         message = {key: value for key, value in stored.items() if not key.startswith("_")}
         if message.get("role") == "assistant" and not message.get("tool_calls"):
@@ -183,7 +192,7 @@ def _running_event(call: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _stream_loop(conversation_id: str) -> Iterator[dict[str, Any]]:
+def _stream_loop(conversation_id: str, voice: bool = False) -> Iterator[dict[str, Any]]:
     settings = get_settings()
 
     try:
@@ -200,7 +209,7 @@ def _stream_loop(conversation_id: str) -> Iterator[dict[str, Any]]:
         assistant: dict[str, Any] | None = None
         try:
             for event in client.stream_chat(
-                _api_messages(db.get_messages(conversation_id)), tool_schemas()
+                _api_messages(db.get_messages(conversation_id), voice), tool_schemas()
             ):
                 if event["type"] == "delta":
                     yield event
@@ -240,7 +249,19 @@ def _stream_loop(conversation_id: str) -> Iterator[dict[str, Any]]:
     yield {"type": "message_end"}
 
 
-def stream_turn(conversation_id: str | None, user_message: str) -> Iterator[dict[str, Any]]:
+def _title_from(message: str) -> str:
+    """Session titles come from the opening line; cut on a word so the rail reads cleanly."""
+    text = " ".join(message.split())
+    if len(text) <= 60:
+        return text or "New conversation"
+    clipped = text[:60]
+    head, _, _ = clipped.rpartition(" ")
+    return f"{head or clipped}\u2026"
+
+
+def stream_turn(
+    conversation_id: str | None, user_message: str, voice: bool = False
+) -> Iterator[dict[str, Any]]:
     """Validate before returning the generator so bad input fails before the response starts."""
     if not user_message.strip():
         raise ValueError("Message is empty.")
@@ -248,12 +269,14 @@ def stream_turn(conversation_id: str | None, user_message: str) -> Iterator[dict
     if conversation_id and db.conversation_exists(conversation_id):
         target = conversation_id
     else:
-        target = db.create_conversation(title=user_message[:60])
+        target = db.create_conversation(title=_title_from(user_message))
 
-    return _stream_user_turn(target, user_message)
+    return _stream_user_turn(target, user_message, voice)
 
 
-def _stream_user_turn(conversation_id: str, user_message: str) -> Iterator[dict[str, Any]]:
+def _stream_user_turn(
+    conversation_id: str, user_message: str, voice: bool = False
+) -> Iterator[dict[str, Any]]:
     yield {"type": "start", "conversation_id": conversation_id}
 
     if db.list_pending_actions(conversation_id):
@@ -266,11 +289,13 @@ def _stream_user_turn(conversation_id: str, user_message: str) -> Iterator[dict[
         return
 
     db.append_message(conversation_id, {"role": "user", "content": user_message})
-    yield from _stream_loop(conversation_id)
+    yield from _stream_loop(conversation_id, voice)
     yield {"type": "done"}
 
 
-def stream_resolution(action_id: str, approve: bool) -> Iterator[dict[str, Any]]:
+def stream_resolution(
+    action_id: str, approve: bool, voice: bool = False
+) -> Iterator[dict[str, Any]]:
     action = db.get_pending_action(action_id)
     if action is None:
         raise KeyError(f"No such action: {action_id}")
@@ -279,10 +304,12 @@ def stream_resolution(action_id: str, approve: bool) -> Iterator[dict[str, Any]]
     if not db.resolve_pending_action(action_id, "approved" if approve else "rejected"):
         raise ValueError("Action was already resolved.")
 
-    return _stream_resolution(action, approve)
+    return _stream_resolution(action, approve, voice)
 
 
-def _stream_resolution(action: dict[str, Any], approve: bool) -> Iterator[dict[str, Any]]:
+def _stream_resolution(
+    action: dict[str, Any], approve: bool, voice: bool = False
+) -> Iterator[dict[str, Any]]:
     conversation_id = action["conversation_id"]
     yield {"type": "start", "conversation_id": conversation_id}
 
@@ -335,7 +362,7 @@ def _stream_resolution(action: dict[str, Any], approve: bool) -> Iterator[dict[s
         yield {"type": "done"}
         return
 
-    yield from _stream_loop(conversation_id)
+    yield from _stream_loop(conversation_id, voice)
     yield {"type": "done"}
 
 
