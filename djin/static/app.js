@@ -17,6 +17,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 let conversationId = null;
 let busy = false;
+let suggestions = [];
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -136,6 +137,17 @@ const STATE_TEXT = {
 
 const activityRows = new Map();
 
+function fillActivity(node, event) {
+  const state = STATE_TEXT[event.status] || event.status;
+  node.replaceChildren(
+    el("span", `dot risk-${event.risk}`),
+    el("span", "tool-name", event.tool),
+    el("span", "state", `${event.risk} · ${state}`)
+  );
+  node.classList.toggle("running", event.status === "running");
+  node.classList.toggle("failed", event.status === "error");
+}
+
 function upsertActivity(event) {
   hideThinking();
   clearEmptyState();
@@ -145,15 +157,7 @@ function upsertActivity(event) {
     chat.appendChild(node);
     activityRows.set(event.tool, node);
   }
-
-  const state = STATE_TEXT[event.status] || event.status;
-  node.replaceChildren(
-    el("span", `dot risk-${event.risk}`),
-    el("span", "tool-name", event.tool),
-    el("span", "state", `${event.risk} · ${state}`)
-  );
-  node.classList.toggle("running", event.status === "running");
-  node.classList.toggle("failed", event.status === "error");
+  fillActivity(node, event);
   scrollToEnd();
 }
 
@@ -203,8 +207,10 @@ function setBusy(value) {
 function handleEvent(event) {
   switch (event.type) {
     case "start":
-      conversationId = event.conversation_id;
-      sessionId.textContent = String(conversationId).slice(0, 8);
+      if (event.conversation_id !== conversationId) {
+        conversationId = event.conversation_id;
+        sessionId.textContent = String(conversationId).slice(0, 8);
+      }
       break;
     case "delta":
       pushDelta(event.content || "");
@@ -302,6 +308,7 @@ async function sendMessage(message, spoken) {
     setBusy(false);
     DjinVoice.turnEnded();
     if (!spoken) input.focus();
+    loadSessions();
   }
 }
 
@@ -323,6 +330,171 @@ input.addEventListener("keydown", (event) => {
     form.requestSubmit();
   }
 });
+
+// ------------------------------------------------------------------ sessions
+
+const sessionList = document.getElementById("session-list");
+const newSessionButton = document.getElementById("new-session");
+const toolRisk = new Map();
+const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+const STEPS = [
+  ["minute", 60_000],
+  ["hour", 3_600_000],
+  ["day", 86_400_000],
+  ["week", 604_800_000],
+  ["month", 2_592_000_000],
+  ["year", 31_536_000_000],
+];
+
+function relativeTime(iso) {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const elapsed = Date.now() - then;
+  if (elapsed < 60_000) return "just now";
+  let [unit, size] = STEPS[0];
+  for (const [nextUnit, nextSize] of STEPS) {
+    if (elapsed < nextSize) break;
+    [unit, size] = [nextUnit, nextSize];
+  }
+  return RELATIVE.format(-Math.round(elapsed / size), unit);
+}
+
+function renderSessions(sessions) {
+  sessionList.replaceChildren();
+  if (!sessions.length) {
+    sessionList.appendChild(el("li", "session-empty", "No saved sessions yet."));
+    return;
+  }
+
+  for (const session of sessions) {
+    const row = el("li", `session${session.id === conversationId ? " is-active" : ""}`);
+
+    const open = el("button", "session-open");
+    open.type = "button";
+    open.append(
+      el("span", "session-title", session.title || "Untitled"),
+      el("span", "session-when", relativeTime(session.updated_at))
+    );
+    open.onclick = () => loadSession(session.id);
+
+    const remove = el("button", "session-del");
+    remove.type = "button";
+    remove.title = "Delete this session";
+    remove.append(icon("trash"), el("span", "sr-only", `Delete ${session.title || "session"}`));
+    remove.onclick = () => armDelete(row, session);
+
+    row.append(open, remove);
+    sessionList.appendChild(row);
+  }
+}
+
+// Deleting a transcript cannot be undone, so the row asks first rather than a dialog.
+function armDelete(row, session) {
+  const previous = [...row.children];
+  row.classList.add("confirming");
+
+  const label = el("span", "confirm-label", "Delete?");
+  const yes = el("button", "confirm-yes", "Delete");
+  yes.type = "button";
+  yes.onclick = () => deleteSession(session.id);
+  const no = el("button", "confirm-no", "Keep");
+  no.type = "button";
+  no.onclick = () => {
+    row.classList.remove("confirming");
+    row.replaceChildren(...previous);
+  };
+
+  row.replaceChildren(label, yes, no);
+  yes.focus();
+}
+
+async function deleteSession(id) {
+  try {
+    const response = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+    if (!response.ok) throw new Error(`Could not delete the session (${response.status})`);
+  } catch (error) {
+    addMessage("error", error.message);
+    return;
+  }
+  if (id === conversationId) startNewSession();
+  await loadSessions();
+}
+
+function startNewSession() {
+  conversationId = null;
+  sessionId.textContent = "new";
+  stream = null;
+  activityRows.clear();
+  renderApprovals([]);
+  chat.replaceChildren();
+  renderEmptyState(suggestions);
+  input.focus();
+}
+
+function toolStatuses(messages) {
+  const statuses = new Map();
+  for (const message of messages) {
+    if (message.role !== "tool" || !message.tool_call_id) continue;
+    const text = message.content || "";
+    const failed = /^(tool error|invalid arguments)/i.test(text) || / failed: /.test(text);
+    statuses.set(message.tool_call_id, failed ? "error" : "ok");
+  }
+  return statuses;
+}
+
+function replay(messages) {
+  chat.replaceChildren();
+  activityRows.clear();
+  const statuses = toolStatuses(messages);
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      addMessage("user", message.content || "");
+    } else if (message.role === "assistant") {
+      if ((message.content || "").trim()) addMessage("assistant", message.content);
+      for (const call of message.tool_calls || []) {
+        const name = (call.function && call.function.name) || "tool";
+        const node = el("div", "activity");
+        fillActivity(node, {
+          tool: name,
+          risk: toolRisk.get(name) || "read",
+          status: statuses.get(call.id) || "ok",
+        });
+        chat.appendChild(node);
+      }
+    }
+  }
+  if (!chat.children.length) renderEmptyState(suggestions);
+  scrollToEnd();
+}
+
+async function loadSession(id) {
+  if (busy) return;
+  try {
+    const response = await fetch(`/api/conversations/${id}`);
+    if (!response.ok) throw new Error(`Could not open that session (${response.status})`);
+    const data = await response.json();
+    conversationId = id;
+    sessionId.textContent = id.slice(0, 8);
+    replay(data.messages);
+    renderApprovals(data.pending);
+    await loadSessions();
+    input.focus();
+  } catch (error) {
+    addMessage("error", error.message);
+  }
+}
+
+async function loadSessions() {
+  try {
+    const response = await fetch("/api/conversations?limit=40");
+    renderSessions(await response.json());
+  } catch {
+    sessionList.replaceChildren(el("li", "session-empty", "Sessions unavailable."));
+  }
+}
+
+newSessionButton.addEventListener("click", startNewSession);
 
 // ------------------------------------------------------------------ session panel
 
@@ -366,7 +538,9 @@ function renderSession(data) {
 
   toolCount.textContent = String(data.tools.length);
   toolList.replaceChildren();
+  toolRisk.clear();
   for (const tool of data.tools) {
+    toolRisk.set(tool.name, tool.risk);
     const item = el("li", "tool");
     item.title = `${tool.risk} · ${tool.description}`;
     item.append(el("span", `dot risk-${tool.risk}`), el("span", "tool-name", tool.name));
@@ -389,7 +563,7 @@ function suggestionsFor(data) {
   return out.slice(0, 4);
 }
 
-function renderEmptyState(suggestions) {
+function renderEmptyState(prompts) {
   const box = el("div", "empty");
   const mark = el("div", "empty-mark");
   mark.appendChild(icon("lamp"));
@@ -400,7 +574,7 @@ function renderEmptyState(suggestions) {
   );
 
   const row = el("div", "suggestions");
-  for (const text of suggestions) {
+  for (const text of prompts) {
     const chip = el("button", "chip", text);
     chip.type = "button";
     chip.onclick = () => {
@@ -419,7 +593,8 @@ async function loadStatus() {
     const response = await fetch("/api/status");
     const data = await response.json();
     renderSession(data);
-    if (!chat.children.length) renderEmptyState(suggestionsFor(data));
+    suggestions = suggestionsFor(data);
+    if (!chat.children.length) renderEmptyState(suggestions);
   } catch {
     modelCard.replaceChildren(el("div", "model-name", "status unavailable"));
     connections.replaceChildren();
@@ -428,6 +603,7 @@ async function loadStatus() {
 }
 
 loadStatus();
+loadSessions();
 DjinVoice.init({ send: sendMessage, isBusy: () => busy });
 autoGrow();
 input.focus();

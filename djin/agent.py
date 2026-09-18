@@ -249,6 +249,16 @@ def _stream_loop(conversation_id: str, voice: bool = False) -> Iterator[dict[str
     yield {"type": "message_end"}
 
 
+def _title_from(message: str) -> str:
+    """Session titles come from the opening line; cut on a word so the rail reads cleanly."""
+    text = " ".join(message.split())
+    if len(text) <= 60:
+        return text or "New conversation"
+    clipped = text[:60]
+    head, _, _ = clipped.rpartition(" ")
+    return f"{head or clipped}\u2026"
+
+
 def stream_turn(
     conversation_id: str | None, user_message: str, voice: bool = False
 ) -> Iterator[dict[str, Any]]:
@@ -259,7 +269,7 @@ def stream_turn(
     if conversation_id and db.conversation_exists(conversation_id):
         target = conversation_id
     else:
-        target = db.create_conversation(title=user_message[:60])
+        target = db.create_conversation(title=_title_from(user_message))
 
     return _stream_user_turn(target, user_message, voice)
 

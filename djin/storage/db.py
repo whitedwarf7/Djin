@@ -130,11 +130,25 @@ def get_messages(conversation_id: str) -> list[dict[str, Any]]:
 def list_conversations(limit: int = 30) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM conversations"
-            " ORDER BY updated_at DESC LIMIT ?",
+            "SELECT c.id, c.title, c.created_at, c.updated_at,"
+            " (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)"
+            " AS message_count"
+            " FROM conversations c ORDER BY c.updated_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """Drops the transcript and any unresolved approvals. The audit log is deliberately
+    left intact - it is the record of what actually ran."""
+    with connect() as conn:
+        conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        conn.execute(
+            "DELETE FROM pending_actions WHERE conversation_id = ?", (conversation_id,)
+        )
+        cursor = conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        return cursor.rowcount > 0
 
 
 def set_conversation_title(conversation_id: str, title: str) -> None:

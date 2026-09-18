@@ -185,6 +185,13 @@ def conversation(conversation_id: str) -> dict[str, Any]:
     }
 
 
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(conversation_id: str) -> dict[str, bool]:
+    if not db.delete_conversation(conversation_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"deleted": True}
+
+
 @app.get("/api/audit")
 def audit(limit: int = 100) -> list[dict[str, Any]]:
     return db.read_audit(limit=min(limit, 500))
