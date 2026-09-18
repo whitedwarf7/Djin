@@ -407,7 +407,7 @@ const DjinVoice = (() => {
     if (!ui.mic) return;
     ui.mic.classList.toggle("active", value);
     ui.mic.setAttribute("aria-pressed", String(value));
-    ui.mic.textContent = value ? "Stop" : "Talk";
+    ui.micLabel.textContent = value ? "Stop" : "Talk";
   }
 
   function setHandsFree(value) {
@@ -419,6 +419,8 @@ const DjinVoice = (() => {
   function bindUi() {
     ui.bar = document.getElementById("voice-bar");
     ui.mic = document.getElementById("mic");
+    // Label lives in its own span so swapping it never wipes the button's icon.
+    ui.micLabel = ui.mic.querySelector(".label") || ui.mic;
     ui.handsFree = document.getElementById("hands-free");
     ui.speak = document.getElementById("speak-replies");
     ui.status = document.getElementById("voice-status");

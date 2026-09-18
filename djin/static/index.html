@@ -3,35 +3,165 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
   <title>Djin</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <header>
-    <h1>Djin</h1>
-    <div id="status" class="status">connecting…</div>
-  </header>
+  <!-- Icon sprite: stroke-only glyphs so every icon inherits currentColor. -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <g id="i-flame" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7.2c1.9 2.3 3 3.7 3 5.3a3 3 0 0 1-6 0c0-1.6 1.1-3 3-5.3Z" />
+      </g>
+      <g id="i-mic" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4a2.5 2.5 0 0 1 2.5 2.5v5a2.5 2.5 0 0 1-5 0v-5A2.5 2.5 0 0 1 12 4Z" />
+        <path d="M6.5 11a5.5 5.5 0 0 0 11 0" />
+        <path d="M12 16.5V20" />
+      </g>
+      <g id="i-send" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4.5 12h14" />
+        <path d="M13 6.5 18.5 12 13 17.5" />
+      </g>
+      <g id="i-check" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12.5 9.5 17 19 7" />
+      </g>
+      <g id="i-close" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" />
+      </g>
+      <g id="i-shield" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.2 19 6v5.4c0 4.2-2.9 7.6-7 8.4-4.1-.8-7-4.2-7-8.4V6l7-2.8Z" />
+        <path d="m9.2 12.2 2 2.1 3.8-4" />
+      </g>
+      <g id="i-mail" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3.25" y="5.5" width="17.5" height="13" rx="2.5" />
+        <path d="m4 7.8 8 5.6 8-5.6" />
+      </g>
+      <g id="i-chat" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H9.5L4 20.5V6.5Z" />
+      </g>
+      <g id="i-search" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="6.25" />
+        <path d="m15.6 15.6 4.4 4.4" />
+      </g>
+      <g id="i-note" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13.8 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.7l-5.2-5.2Z" />
+        <path d="M13.6 3.7v5h5" />
+        <path d="M8.5 13.5h7M8.5 16.8h4.5" />
+      </g>
+      <g id="i-chip" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6.25" y="6.25" width="11.5" height="11.5" rx="2.5" />
+        <path d="M9.8 3.2v3M14.2 3.2v3M9.8 17.8v3M14.2 17.8v3M3.2 9.8h3M3.2 14.2h3M17.8 9.8h3M17.8 14.2h3" />
+      </g>
+      <g id="i-sliders" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6.5h4.2M12.2 6.5H20M4 12h8.2M16.2 12H20M4 17.5h3.2M11.2 17.5H20" />
+        <circle cx="10.2" cy="6.5" r="2" />
+        <circle cx="14.2" cy="12" r="2" />
+        <circle cx="9.2" cy="17.5" r="2" />
+      </g>
+      <g id="i-link" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m9.2 14.8 5.6-5.6" />
+        <path d="m10.6 6.9 1.3-1.3a4.2 4.2 0 0 1 5.9 5.9l-1.3 1.3" />
+        <path d="m13.4 17.1-1.3 1.3a4.2 4.2 0 0 1-5.9-5.9l1.3-1.3" />
+      </g>
+      <g id="i-chevron" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m9.5 6.5 5.5 5.5-5.5 5.5" />
+      </g>
+    </defs>
+  </svg>
 
-  <main>
-    <section id="chat" class="chat" aria-live="polite"></section>
+  <div class="shell">
+    <aside class="rail" aria-label="Session details">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><use href="#i-flame" /></svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-name">Djin</span>
+          <span class="brand-sub">runs on your machine</span>
+        </span>
+      </div>
 
-    <section id="approvals" class="approvals hidden">
-      <h2>Approval required</h2>
-      <div id="approval-list"></div>
-    </section>
+      <section class="rail-block">
+        <h2 class="rail-title"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chip" /></svg>Model</h2>
+        <div id="model-card" class="model-card">
+          <span class="skeleton" style="width: 72%"></span>
+          <span class="skeleton" style="width: 44%"></span>
+        </div>
+      </section>
 
-    <div id="voice-bar" class="voice-bar hidden">
-      <button type="button" id="mic" class="mic" aria-pressed="false" title="Talk (Ctrl+Space)">Talk</button>
-      <label class="toggle"><input type="checkbox" id="hands-free" /> Hands-free</label>
-      <label class="toggle"><input type="checkbox" id="speak-replies" checked /> Speak replies</label>
-      <span id="voice-status" class="voice-status" aria-live="polite"></span>
-    </div>
+      <section class="rail-block">
+        <h2 class="rail-title"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link" /></svg>Connections</h2>
+        <ul id="connections" class="connections">
+          <li><span class="skeleton" style="width: 80%"></span></li>
+          <li><span class="skeleton" style="width: 62%"></span></li>
+          <li><span class="skeleton" style="width: 70%"></span></li>
+        </ul>
+      </section>
 
-    <form id="composer" class="composer">
-      <textarea id="input" rows="3" placeholder="Ask Djin… (Enter to send, Shift+Enter for a new line)"></textarea>
-      <button type="submit" id="send">Send</button>
-    </form>
-  </main>
+      <details class="rail-block tools" id="tools-block">
+        <summary class="rail-title">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sliders" /></svg>
+          <span>Capabilities</span>
+          <span id="tool-count" class="count"></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true" class="marker"><use href="#i-chevron" /></svg>
+        </summary>
+        <ul id="tool-list" class="tool-list"></ul>
+      </details>
+
+      <div class="rail-foot">
+        <p><kbd>Enter</kbd> send · <kbd>Shift</kbd><kbd>Enter</kbd> newline</p>
+        <p><kbd>Ctrl</kbd><kbd>Space</kbd> talk · <kbd>Esc</kbd> stop</p>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <header class="topbar">
+        <div class="session">
+          <span class="session-label">Session</span>
+          <span id="session-id" class="session-id">new</span>
+        </div>
+        <div id="status" class="status" role="status"></div>
+      </header>
+
+      <section id="chat" class="transcript" aria-live="polite" aria-label="Conversation"></section>
+
+      <div class="dock">
+        <section id="approvals" class="approvals hidden" aria-labelledby="approvals-title">
+          <div class="approvals-head">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-shield" /></svg>
+            <h2 id="approvals-title">Djin is waiting on you</h2>
+          </div>
+          <div id="approval-list"></div>
+        </section>
+
+        <form id="composer" class="composer">
+          <textarea id="input" rows="1" placeholder="Ask Djin anything…" aria-label="Message"></textarea>
+
+          <div class="composer-bar">
+            <div id="voice-bar" class="voice-bar hidden">
+              <button type="button" id="mic" class="mic" aria-pressed="false" title="Talk (Ctrl+Space)">
+                <span class="mic-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><use href="#i-mic" /></svg>
+                  <span class="wave"><i></i><i></i><i></i></span>
+                </span>
+                <span class="label">Talk</span>
+              </button>
+              <label class="toggle"><input type="checkbox" id="hands-free" /><span>Hands-free</span></label>
+              <label class="toggle"><input type="checkbox" id="speak-replies" checked /><span>Speak replies</span></label>
+              <span id="voice-status" class="voice-status" aria-live="polite"></span>
+            </div>
+
+            <button type="submit" id="send" class="send">
+              <span class="label">Send</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-send" /></svg>
+            </button>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
 
   <script src="/static/markdown.js"></script>
   <script src="/static/voice.js"></script>

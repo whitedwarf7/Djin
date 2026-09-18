@@ -1,6 +1,7 @@
 # Secrets and local state
 .env
-data/
+# Root-scoped: an unanchored data/ also swallows .github/skills/*/data.
+/data/
 *.key
 *.sqlite3
 *.db
