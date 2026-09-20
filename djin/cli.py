@@ -9,16 +9,11 @@ from djin.config import get_settings
 from djin.storage import db, secrets
 
 
-def _login(service: str) -> int:
+def _login() -> int:
     db.init_db()
-    if service == "google":
-        from djin.integrations import google_auth
+    from djin.integrations import google_auth
 
-        print(f"Connected Google account: {google_auth.run_login()}")
-    else:
-        from djin.integrations import reddit_auth
-
-        print(f"Connected Reddit account: u/{reddit_auth.run_login()}")
+    print(f"Connected Google account: {google_auth.run_login()}")
     return 0
 
 
@@ -33,7 +28,7 @@ def _status() -> int:
     db.init_db()
     settings = get_settings()
     schedules = db.list_schedules()
-    from djin.integrations import google_auth, reddit_auth
+    from djin.integrations import google_auth
 
     def mark(value: bool) -> str:
         return "yes" if value else "no"
@@ -41,7 +36,6 @@ def _status() -> int:
     print(f"Provider        : {settings.llm_provider} ({settings.llm_model})")
     print(f"LLM key present : {mark(bool(settings.llm_api_key))}")
     print(f"Google config   : {mark(settings.google_configured)}   connected: {mark(google_auth.is_connected())}")
-    print(f"Reddit config   : {mark(settings.reddit_configured)}   connected: {mark(reddit_auth.is_connected())}")
     print(f"Search          : {settings.search_provider} (configured: {mark(settings.search_configured)})")
     print(f"Notes folder    : {settings.notes_dir}")
     print(
@@ -72,10 +66,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="Show configuration and connection status")
 
     login = sub.add_parser("login", help="Connect an account")
-    login.add_argument("service", choices=["google", "reddit"])
+    login.add_argument("service", choices=["google"])
 
     logout = sub.add_parser("logout", help="Remove stored credentials for an account")
-    logout.add_argument("service", choices=["google", "reddit"])
+    logout.add_argument("service", choices=["google"])
 
     args = parser.parse_args(argv)
     try:
@@ -84,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             return _status()
         if args.command == "login":
-            return _login(args.service)
+            return _login()
         if args.command == "logout":
             return _logout(args.service)
     except KeyboardInterrupt:

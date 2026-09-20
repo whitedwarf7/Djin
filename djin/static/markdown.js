@@ -1,6 +1,6 @@
 // Safe Markdown renderer.
 // Builds DOM nodes directly and never assigns innerHTML, so model output containing text
-// pulled from emails, web pages or Reddit cannot inject markup or scripts.
+// pulled from emails or web pages cannot inject markup or scripts.
 (function (global) {
   "use strict";
 

@@ -53,7 +53,7 @@ def _create_preview(
     name="notes_create",
     description=(
         "Create a Markdown note in the user's local notes vault."
-        " Always include the source URLs when the note summarises web or Reddit content."
+        " Always include the source URLs when the note summarises web content."
     ),
     parameters={
         "type": "object",

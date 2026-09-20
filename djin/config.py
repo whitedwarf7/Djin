@@ -9,9 +9,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-REDDIT_REDIRECT_PORT = 8912
-REDDIT_REDIRECT_URI = f"http://localhost:{REDDIT_REDIRECT_PORT}/reddit/callback"
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -29,10 +26,6 @@ class Settings(BaseSettings):
 
     google_client_id: str = ""
     google_client_secret: str = ""
-
-    reddit_client_id: str = ""
-    reddit_client_secret: str = ""
-    reddit_user_agent: str = "windows:djin-assistant:0.1.0 (personal use)"
 
     search_provider: Literal["brave", "tavily", "none"] = "none"
     brave_api_key: str = ""
@@ -90,10 +83,6 @@ class Settings(BaseSettings):
     @property
     def google_configured(self) -> bool:
         return bool(self.google_client_id and self.google_client_secret)
-
-    @property
-    def reddit_configured(self) -> bool:
-        return bool(self.reddit_client_id and self.reddit_client_secret)
 
     @property
     def search_configured(self) -> bool:
