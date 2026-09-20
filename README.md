@@ -189,25 +189,69 @@ DJIN_NOTES_DIR=C:\Users\you\OneDrive\DjinNotes
 
 ### 6. Scheduler and push notifications
 
-Schedules run while the Djin server is running and survive restarts. Create them conversationally:
+The scheduler saves recurring assistant prompts in SQLite and runs them automatically. Each run
+creates a new conversation named `Scheduled: <schedule name>`, so its result remains available in
+the Sessions list even when push delivery is disabled or fails. Saved schedules survive restarts,
+but Djin can run them only while the server is running and the computer is awake. Scheduled prompts
+use the same integrations as normal chat: connect Google first for Gmail or Calendar briefings, and
+configure a search provider before scheduling web research.
+
+Enable the scheduler and choose its default timezone in `.env`:
+
+```ini
+DJIN_SCHEDULER_ENABLED=true
+# Use "local" or an IANA timezone such as Europe/Berlin.
+DJIN_SCHEDULER_TIMEZONE=local
+```
+
+Restart Djin after changing `.env`, then create a schedule conversationally:
 
 > Every weekday at 7 AM, summarise today's calendar and unread priority email. Send me the result.
 
-Djin shows an approval card before creating or re-enabling recurring work. Each run gets a fresh
-conversation and a hard tool-risk ceiling; the default `read` ceiling blocks writes and external
-actions even if the model attempts one. Five-field cron expressions and the machine's local
-timezone are used by default.
+Djin translates the request into a five-field cron expression and shows the complete prompt,
+timezone, notification choice and risk ceiling in an approval card. Nothing is scheduled until
+you approve it. The scheduler uses the configured default timezone unless the request names a
+different IANA timezone.
+
+Manage schedules in chat:
+
+- "List my recurring schedules."
+- "Pause the morning briefing."
+- "Resume the morning briefing."
+- "Delete the morning briefing."
+
+Creating or resuming a schedule always requires approval; deleting one requires destructive-action
+approval. Scheduled turns default to a hard `read` ceiling. At that ceiling the model cannot use
+tools that create or append notes, create drafts, or perform any externally visible action, even if
+it attempts to call one. A schedule may use a `write` ceiling only when explicitly requested and
+approved. External and destructive tools are never available to unattended runs.
+
+#### Phone push with ntfy
 
 Results always remain in Conversations. To also receive them on a phone, install the free
-[ntfy app](https://ntfy.sh/), subscribe to a long random topic name, and add it to `.env`:
+[ntfy app](https://ntfy.sh/), choose a long random topic name, and subscribe to that topic. Add the
+same topic to `.env`:
 
 ```ini
 DJIN_NTFY_TOPIC=replace-with-a-long-random-topic
+DJIN_NTFY_BASE_URL=https://ntfy.sh
+# Leave empty for an unauthenticated public topic.
+DJIN_NTFY_TOKEN=
 ```
 
-For a self-hosted or authenticated ntfy server, also set `DJIN_NTFY_BASE_URL` and
-`DJIN_NTFY_TOKEN`. Messages sent through the public `ntfy.sh` service leave your computer;
-topic names on the public service act like passwords and should not be guessable.
+Restart Djin. The Connections rail should change from **Push: not set up** to **Push: ntfy**.
+Test delivery in chat:
+
+> Send a push notification titled "Djin test" saying "Push is working."
+
+One-off push notifications always show an approval card before leaving the computer. Scheduled
+pushes do not ask again at delivery time because the schedule and its `notify` setting were already
+approved. For a self-hosted or authenticated ntfy server, replace `DJIN_NTFY_BASE_URL` and set
+`DJIN_NTFY_TOKEN` as required by that server.
+
+Messages sent through the public `ntfy.sh` service leave your computer and can contain information
+from email, calendars or notes. Public topic names act like passwords: use a long, unguessable name,
+do not reuse it elsewhere, or self-host ntfy for stronger privacy.
 
 ### 7. Voice (optional)
 
@@ -381,6 +425,18 @@ not allowed to reach your local network.
 
 **The model ignores the tools** — the model must support tool calling. `gpt-4o-mini` is a safe
 default.
+
+**A schedule did not run** — Djin must be running and the computer must be awake at the scheduled
+time. Check the Connections rail for **Schedules**, ask Djin to list recurring schedules, and check
+`python -m djin.cli status` for the configured timezone. Restart Djin after editing `.env`.
+
+**Push says `not set up`** — set a non-empty `DJIN_NTFY_TOPIC` in `.env` and restart Djin. The topic
+must exactly match the one subscribed to in the ntfy app. For an authenticated server, also verify
+`DJIN_NTFY_BASE_URL` and `DJIN_NTFY_TOKEN`.
+
+**A scheduled result exists but no notification arrived** — open its `Scheduled: ...` conversation
+to confirm the run completed, then verify the ntfy topic, network access and server credentials.
+The schedule result is stored locally even when delivery fails.
 
 **The voice controls say the browser has no speech recognition** — only Chromium-based browsers
 implement it. Use Chrome or Edge, or set `DJIN_STT_PROVIDER=openai` with `DJIN_VOICE_API_KEY`.
