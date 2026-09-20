@@ -20,11 +20,13 @@ from djin.tools import (
     requires_approval,
     tool_schemas,
 )
+from djin.tools.registry import Risk, risk_within_ceiling
 
 SYSTEM_PROMPT = """You are Djin, a personal assistant running locally on the user's own computer.
 
 You can use tools to read Gmail, read and create Google Calendar events, search the web,
-read Reddit with the user's account, and manage a local Markdown notes vault.
+read Reddit with the user's account, manage a local Markdown notes vault, schedule recurring
+unattended turns, and send approved push notifications.
 
 Rules you must follow:
 1. Prefer calling a tool over guessing. Never invent email contents, events, posts or URLs.
@@ -76,18 +78,29 @@ class TurnResult:
         }
 
 
-def _system_message(voice: bool = False) -> dict[str, str]:
+def _system_message(
+    voice: bool = False, risk_ceiling: Risk | None = None
+) -> dict[str, str]:
     now = datetime.now().astimezone()
     content = SYSTEM_PROMPT.format(
         now=now.strftime("%Y-%m-%d %H:%M"), timezone=now.tzname() or "local time"
     )
     if voice:
         content += VOICE_STYLE
+    if risk_ceiling is not None:
+        content += (
+            f"\nThis is an unattended turn. You may use only {risk_ceiling.value} tools"
+            " or lower-risk tools. Do not attempt any higher-risk action.\n"
+        )
     return {"role": "system", "content": content}
 
 
-def _api_messages(history: list[dict[str, Any]], voice: bool = False) -> list[dict[str, Any]]:
-    messages = [_system_message(voice)]
+def _api_messages(
+    history: list[dict[str, Any]],
+    voice: bool = False,
+    risk_ceiling: Risk | None = None,
+) -> list[dict[str, Any]]:
+    messages = [_system_message(voice, risk_ceiling)]
     for stored in history:
         message = {key: value for key, value in stored.items() if not key.startswith("_")}
         if message.get("role") == "assistant" and not message.get("tool_calls"):
@@ -130,7 +143,11 @@ def _execute(
     return content, status
 
 
-def _handle_tool_call(call: dict[str, Any], conversation_id: str) -> tuple[ToolActivity | None, bool]:
+def _handle_tool_call(
+    call: dict[str, Any],
+    conversation_id: str,
+    risk_ceiling: Risk | None = None,
+) -> tuple[ToolActivity | None, bool]:
     """Returns (activity, paused_for_approval)."""
     call_id = call.get("id") or uuid.uuid4().hex
     function = call.get("function") or {}
@@ -153,6 +170,25 @@ def _handle_tool_call(call: dict[str, Any], conversation_id: str) -> tuple[ToolA
             conversation_id, _tool_message(call_id, name, f"Unknown tool '{name}'.")
         )
         return ToolActivity(name, "unknown", "error", "n/a", "unknown tool"), False
+
+    if not risk_within_ceiling(spec.risk, risk_ceiling):
+        content = (
+            f"Tool blocked by the unattended-run policy: {spec.name} has"
+            f" {spec.risk.value} risk, but this run allows {risk_ceiling.value} risk."
+        )
+        db.append_message(conversation_id, _tool_message(call_id, spec.name, content))
+        db.log_audit(
+            conversation_id=conversation_id,
+            tool_name=spec.name,
+            risk=spec.risk.value,
+            arguments=arguments,
+            approval="policy",
+            status="blocked",
+            detail=content,
+        )
+        return ToolActivity(
+            spec.name, spec.risk.value, "blocked", "policy", content
+        ), False
 
     if requires_approval(spec):
         preview = build_preview(spec, arguments)
@@ -192,7 +228,11 @@ def _running_event(call: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _stream_loop(conversation_id: str, voice: bool = False) -> Iterator[dict[str, Any]]:
+def _stream_loop(
+    conversation_id: str,
+    voice: bool = False,
+    risk_ceiling: Risk | None = None,
+) -> Iterator[dict[str, Any]]:
     settings = get_settings()
 
     try:
@@ -209,7 +249,8 @@ def _stream_loop(conversation_id: str, voice: bool = False) -> Iterator[dict[str
         assistant: dict[str, Any] | None = None
         try:
             for event in client.stream_chat(
-                _api_messages(db.get_messages(conversation_id), voice), tool_schemas()
+                _api_messages(db.get_messages(conversation_id), voice, risk_ceiling),
+                tool_schemas(risk_ceiling),
             ):
                 if event["type"] == "delta":
                     yield event
@@ -233,7 +274,9 @@ def _stream_loop(conversation_id: str, voice: bool = False) -> Iterator[dict[str
         paused = False
         for call in tool_calls:
             yield _running_event(call)
-            activity, needs_approval = _handle_tool_call(call, conversation_id)
+            activity, needs_approval = _handle_tool_call(
+                call, conversation_id, risk_ceiling
+            )
             if activity:
                 yield {"type": "tool", **vars(activity)}
             paused = paused or needs_approval
@@ -260,7 +303,10 @@ def _title_from(message: str) -> str:
 
 
 def stream_turn(
-    conversation_id: str | None, user_message: str, voice: bool = False
+    conversation_id: str | None,
+    user_message: str,
+    voice: bool = False,
+    risk_ceiling: Risk | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Validate before returning the generator so bad input fails before the response starts."""
     if not user_message.strip():
@@ -271,11 +317,14 @@ def stream_turn(
     else:
         target = db.create_conversation(title=_title_from(user_message))
 
-    return _stream_user_turn(target, user_message, voice)
+    return _stream_user_turn(target, user_message, voice, risk_ceiling)
 
 
 def _stream_user_turn(
-    conversation_id: str, user_message: str, voice: bool = False
+    conversation_id: str,
+    user_message: str,
+    voice: bool = False,
+    risk_ceiling: Risk | None = None,
 ) -> Iterator[dict[str, Any]]:
     yield {"type": "start", "conversation_id": conversation_id}
 
@@ -289,7 +338,7 @@ def _stream_user_turn(
         return
 
     db.append_message(conversation_id, {"role": "user", "content": user_message})
-    yield from _stream_loop(conversation_id, voice)
+    yield from _stream_loop(conversation_id, voice, risk_ceiling)
     yield {"type": "done"}
 
 
@@ -396,8 +445,12 @@ def _collect(events: Iterator[dict[str, Any]]) -> TurnResult:
     return result
 
 
-def start_turn(conversation_id: str | None, user_message: str) -> TurnResult:
-    return _collect(stream_turn(conversation_id, user_message))
+def start_turn(
+    conversation_id: str | None,
+    user_message: str,
+    risk_ceiling: Risk | None = None,
+) -> TurnResult:
+    return _collect(stream_turn(conversation_id, user_message, risk_ceiling=risk_ceiling))
 
 
 def resolve_action(action_id: str, approve: bool) -> TurnResult:

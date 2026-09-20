@@ -57,6 +57,25 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
     ciphertext  BLOB NOT NULL,
     updated_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS schedules (
+    id                      TEXT PRIMARY KEY,
+    name                    TEXT NOT NULL,
+    prompt                  TEXT NOT NULL,
+    cron                    TEXT NOT NULL,
+    timezone                TEXT NOT NULL,
+    risk_ceiling            TEXT NOT NULL CHECK (risk_ceiling IN ('read', 'write')),
+    notify                  INTEGER NOT NULL DEFAULT 1,
+    enabled                 INTEGER NOT NULL DEFAULT 1,
+    last_run_at             TEXT,
+    next_run_at             TEXT,
+    last_status             TEXT,
+    last_error              TEXT,
+    last_conversation_id    TEXT,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_schedules_enabled ON schedules(enabled);
 """
 
 
@@ -268,3 +287,102 @@ def read_audit(limit: int = 100) -> list[dict[str, Any]]:
             "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _row_to_schedule(row: sqlite3.Row) -> dict[str, Any]:
+    schedule = dict(row)
+    schedule["notify"] = bool(schedule["notify"])
+    schedule["enabled"] = bool(schedule["enabled"])
+    return schedule
+
+
+def create_schedule(
+    *,
+    name: str,
+    prompt: str,
+    cron: str,
+    timezone_name: str,
+    risk_ceiling: str = "read",
+    notify: bool = True,
+) -> dict[str, Any]:
+    schedule_id = uuid.uuid4().hex
+    now = utcnow()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO schedules"
+            " (id, name, prompt, cron, timezone, risk_ceiling, notify, enabled,"
+            "  created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            (
+                schedule_id,
+                name,
+                prompt,
+                cron,
+                timezone_name,
+                risk_ceiling,
+                int(notify),
+                now,
+                now,
+            ),
+        )
+    schedule = get_schedule(schedule_id)
+    if schedule is None:
+        raise RuntimeError("Schedule was not persisted.")
+    return schedule
+
+
+def get_schedule(schedule_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM schedules WHERE id = ?", (schedule_id,)
+        ).fetchone()
+    return _row_to_schedule(row) if row else None
+
+
+def list_schedules(enabled_only: bool = False) -> list[dict[str, Any]]:
+    query = "SELECT * FROM schedules"
+    if enabled_only:
+        query += " WHERE enabled = 1"
+    query += " ORDER BY name COLLATE NOCASE, created_at"
+    with connect() as conn:
+        rows = conn.execute(query).fetchall()
+    return [_row_to_schedule(row) for row in rows]
+
+
+def set_schedule_enabled(schedule_id: str, enabled: bool) -> dict[str, Any] | None:
+    with connect() as conn:
+        cursor = conn.execute(
+            "UPDATE schedules SET enabled = ?, updated_at = ? WHERE id = ?",
+            (int(enabled), utcnow(), schedule_id),
+        )
+    return get_schedule(schedule_id) if cursor.rowcount else None
+
+
+def delete_schedule(schedule_id: str) -> bool:
+    with connect() as conn:
+        cursor = conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
+    return cursor.rowcount > 0
+
+
+def set_schedule_next_run(schedule_id: str, next_run_at: str | None) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE schedules SET next_run_at = ?, updated_at = ? WHERE id = ?",
+            (next_run_at, utcnow(), schedule_id),
+        )
+
+
+def record_schedule_run(
+    schedule_id: str,
+    *,
+    status: str,
+    conversation_id: str | None,
+    error: str | None = None,
+) -> None:
+    now = utcnow()
+    with connect() as conn:
+        conn.execute(
+            "UPDATE schedules SET last_run_at = ?, last_status = ?, last_error = ?,"
+            " last_conversation_id = ?, updated_at = ? WHERE id = ?",
+            (now, status, (error or "")[:2000], conversation_id, now, schedule_id),
+        )

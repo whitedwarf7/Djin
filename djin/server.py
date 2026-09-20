@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from djin import agent, voice
+from djin import agent, scheduler, voice
 from djin.config import get_settings
 from djin.integrations import google_auth, reddit_auth
 from djin.storage import db
@@ -26,7 +26,11 @@ MAX_TTS_CHARS = voice.MAX_TTS_CHARS
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
-    yield
+    scheduler.start()
+    try:
+        yield
+    finally:
+        scheduler.shutdown()
 
 
 app = FastAPI(title="Djin", version="0.1.0", lifespan=lifespan)
@@ -66,6 +70,7 @@ def index() -> FileResponse:
 @app.get("/api/status")
 def status() -> dict[str, Any]:
     settings = get_settings()
+    schedules = db.list_schedules()
     return {
         "provider": settings.llm_provider,
         "model": settings.llm_model,
@@ -85,6 +90,16 @@ def status() -> dict[str, Any]:
                 "provider": settings.search_provider,
             },
             "notes": {"configured": True, "path": str(settings.notes_dir)},
+            "scheduler": {
+                "configured": settings.scheduler_enabled,
+                "connected": scheduler.is_running(),
+                "count": len(schedules),
+                "enabled_count": sum(item["enabled"] for item in schedules),
+            },
+            "notifications": {
+                "configured": settings.ntfy_configured,
+                "provider": "ntfy",
+            },
         },
         "voice": voice.client_config(settings),
         "tools": [

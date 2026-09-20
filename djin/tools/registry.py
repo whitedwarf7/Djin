@@ -34,6 +34,13 @@ class ToolSpec:
 
 REGISTRY: dict[str, ToolSpec] = {}
 
+_RISK_LEVEL = {
+    Risk.READ: 0,
+    Risk.WRITE: 1,
+    Risk.EXTERNAL: 2,
+    Risk.DESTRUCTIVE: 3,
+}
+
 
 def register(
     *,
@@ -67,7 +74,11 @@ def get_tool(name: str) -> ToolSpec | None:
     return REGISTRY.get(name)
 
 
-def tool_schemas() -> list[dict[str, Any]]:
+def risk_within_ceiling(risk: Risk, ceiling: Risk | None) -> bool:
+    return ceiling is None or _RISK_LEVEL[risk] <= _RISK_LEVEL[ceiling]
+
+
+def tool_schemas(risk_ceiling: Risk | None = None) -> list[dict[str, Any]]:
     """Tool definitions in OpenAI function-calling format."""
     return [
         {
@@ -79,6 +90,7 @@ def tool_schemas() -> list[dict[str, Any]]:
             },
         }
         for spec in REGISTRY.values()
+        if risk_within_ceiling(spec.risk, risk_ceiling)
     ]
 
 

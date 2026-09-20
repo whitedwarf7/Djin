@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     voice_timeout: float = 60.0
     max_audio_bytes: int = 15_000_000
 
+    scheduler_enabled: bool = True
+    scheduler_timezone: str = "local"
+
+    ntfy_topic: str = ""
+    ntfy_base_url: str = "https://ntfy.sh"
+    ntfy_token: str = ""
+    notification_timeout: float = 15.0
+
     data_dir: Path = PROJECT_ROOT / "data"
     notes_dir: Path = PROJECT_ROOT / "data" / "notes"
     encryption_key: str = ""
@@ -94,6 +102,10 @@ class Settings(BaseSettings):
         if self.search_provider == "tavily":
             return bool(self.tavily_api_key)
         return False
+
+    @property
+    def ntfy_configured(self) -> bool:
+        return bool(self.ntfy_topic.strip())
 
     @property
     def voice_key(self) -> str:
