@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from djin import agent, scheduler, voice
 from djin.config import get_settings
-from djin.integrations import google_auth, reddit_auth
+from djin.integrations import google_auth
 from djin.storage import db
 from djin.tools import REGISTRY
 
@@ -80,10 +80,6 @@ def status() -> dict[str, Any]:
             "google": {
                 "configured": settings.google_configured,
                 "connected": google_auth.is_connected(),
-            },
-            "reddit": {
-                "configured": settings.reddit_configured,
-                "connected": reddit_auth.is_connected(),
             },
             "search": {
                 "configured": settings.search_configured,

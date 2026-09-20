@@ -5,7 +5,6 @@ from djin.tools import (  # noqa: F401  (imported for registration side effects)
     gmail_tools,
     notification_tools,
     notes_tools,
-    reddit_tools,
     schedule_tools,
     search_tools,
 )

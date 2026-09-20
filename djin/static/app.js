@@ -500,7 +500,6 @@ newSessionButton.addEventListener("click", startNewSession);
 
 const CONNECTIONS = [
   { key: "google", glyph: "mail", label: "Google" },
-  { key: "reddit", glyph: "chat", label: "Reddit" },
   { key: "search", glyph: "search", label: "Web search" },
   { key: "notes", glyph: "note", label: "Notes" },
   { key: "scheduler", glyph: "history", label: "Schedules" },
@@ -568,11 +567,10 @@ function renderSession(data) {
 
 function suggestionsFor(data) {
   const out = [];
-  const { google, search, reddit, scheduler } = data.integrations;
+  const { google, search, scheduler } = data.integrations;
   if (google && google.connected) out.push("Digest my unread mail", "What is on my calendar tomorrow?");
   if (scheduler && scheduler.connected) out.push("Schedule a weekday briefing at 7:00 AM");
   if (search && search.configured) out.push("Find this week's coverage of the EU AI Act");
-  if (reddit && reddit.connected) out.push("What is r/LocalLLaMA arguing about today?");
   out.push("Which tools can you run?", "Start a note called Scratch");
   return out.slice(0, 4);
 }
@@ -584,7 +582,7 @@ function renderEmptyState(prompts) {
   box.append(
     mark,
     el("h2", null, "What should I dig into?"),
-    el("p", null, "Mail, calendar, the web, Reddit and your notes — read freely, write only with your say-so.")
+    el("p", null, "Mail, calendar, the web and your notes — read freely, write only with your say-so.")
   );
 
   const row = el("div", "suggestions");

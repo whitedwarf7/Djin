@@ -1,3 +1,3 @@
-from djin.integrations import google_auth, reddit_auth
+from djin.integrations import google_auth
 
-__all__ = ["google_auth", "reddit_auth"]
+__all__ = ["google_auth"]
