@@ -503,6 +503,8 @@ const CONNECTIONS = [
   { key: "reddit", glyph: "chat", label: "Reddit" },
   { key: "search", glyph: "search", label: "Web search" },
   { key: "notes", glyph: "note", label: "Notes" },
+  { key: "scheduler", glyph: "history", label: "Schedules" },
+  { key: "notifications", glyph: "send", label: "Push" },
 ];
 
 function connectionState(key, info) {
@@ -513,6 +515,17 @@ function connectionState(key, info) {
       : { on: false, text: "not set up" };
   }
   if (key === "notes") return { on: true, text: "local" };
+  if (key === "scheduler") {
+    if (!info.configured) return { on: false, text: "disabled" };
+    if (!info.connected) return { on: false, text: "stopped" };
+    const count = info.enabled_count || 0;
+    return { on: true, text: `${count} active` };
+  }
+  if (key === "notifications") {
+    return info.configured
+      ? { on: true, text: info.provider || "ready" }
+      : { on: false, text: "not set up" };
+  }
   if (info.connected) return { on: true, text: "linked" };
   return { on: false, text: info.configured ? "sign in" : "not set up" };
 }
@@ -555,8 +568,9 @@ function renderSession(data) {
 
 function suggestionsFor(data) {
   const out = [];
-  const { google, search, reddit } = data.integrations;
+  const { google, search, reddit, scheduler } = data.integrations;
   if (google && google.connected) out.push("Digest my unread mail", "What is on my calendar tomorrow?");
+  if (scheduler && scheduler.connected) out.push("Schedule a weekday briefing at 7:00 AM");
   if (search && search.configured) out.push("Find this week's coverage of the EU AI Act");
   if (reddit && reddit.connected) out.push("What is r/LocalLLaMA arguing about today?");
   out.push("Which tools can you run?", "Start a note called Scratch");

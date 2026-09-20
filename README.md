@@ -1,10 +1,12 @@
 # Djin
 
 A local-first personal AI assistant. Djin can read your Gmail, manage your Google Calendar,
-search the web, browse Reddit with your account, and keep a Markdown notes vault.
+search the web, browse Reddit with your account, keep a Markdown notes vault, and run recurring
+briefings with optional push delivery.
 
-Everything runs on your own machine. Your credentials, notes and conversation history never
-leave it — only your prompts and the content you ask Djin to work with go to the LLM provider.
+Everything runs on your own machine. Your credentials, notes and conversation history remain
+local. Prompts and requested content go to the configured LLM provider; if you opt into hosted
+ntfy delivery, scheduled summaries also go to that service.
 
 ## Table of contents
 
@@ -185,7 +187,29 @@ Notes are plain Markdown files in `data/notes`. To sync them, point the folder a
 DJIN_NOTES_DIR=C:\Users\you\OneDrive\DjinNotes
 ```
 
-### 6. Voice (optional)
+### 6. Scheduler and push notifications
+
+Schedules run while the Djin server is running and survive restarts. Create them conversationally:
+
+> Every weekday at 7 AM, summarise today's calendar and unread priority email. Send me the result.
+
+Djin shows an approval card before creating or re-enabling recurring work. Each run gets a fresh
+conversation and a hard tool-risk ceiling; the default `read` ceiling blocks writes and external
+actions even if the model attempts one. Five-field cron expressions and the machine's local
+timezone are used by default.
+
+Results always remain in Conversations. To also receive them on a phone, install the free
+[ntfy app](https://ntfy.sh/), subscribe to a long random topic name, and add it to `.env`:
+
+```ini
+DJIN_NTFY_TOPIC=replace-with-a-long-random-topic
+```
+
+For a self-hosted or authenticated ntfy server, also set `DJIN_NTFY_BASE_URL` and
+`DJIN_NTFY_TOKEN`. Messages sent through the public `ntfy.sh` service leave your computer;
+topic names on the public service act like passwords and should not be guessable.
+
+### 7. Voice (optional)
 
 Voice works out of the box in Chrome and Edge with no extra configuration: the page uses the
 browser's own speech recognition and speech synthesis.
@@ -218,6 +242,11 @@ instance, so audio need not leave the machine.
 | `DJIN_BRAVE_API_KEY` / `DJIN_TAVILY_API_KEY` | – | Search key |
 | `DJIN_NOTES_DIR` | `data/notes` | Notes vault location |
 | `DJIN_AUTO_APPROVE_WRITE` | `true` | Set `false` to confirm drafts and notes too |
+| `DJIN_SCHEDULER_ENABLED` | `true` | Run persisted schedules while the server is open |
+| `DJIN_SCHEDULER_TIMEZONE` | `local` | `local` or an IANA timezone such as `Europe/Berlin` |
+| `DJIN_NTFY_TOPIC` | – | Optional ntfy topic for scheduled push delivery |
+| `DJIN_NTFY_BASE_URL` | `https://ntfy.sh` | Public or self-hosted ntfy server |
+| `DJIN_NTFY_TOKEN` | – | Optional ntfy access token |
 | `DJIN_VOICE_ENABLED` | `true` | Set `false` to hide the voice controls |
 | `DJIN_STT_PROVIDER` | `browser` | `browser` or `openai` |
 | `DJIN_TTS_PROVIDER` | `browser` | `browser` or `openai` |
@@ -271,6 +300,8 @@ mode and waits for you to click **Approve** or **Reject**.
 - "What's trending in r/LocalLLaMA today? Save the interesting ones to a note."
 - "Search the web for the current state of on-device LLMs and write me a note with sources."
 - "Draft a polite reply to the last email from my manager."
+- "Every weekday at 7 AM, summarise today's calendar and unread priority email."
+- "List my recurring schedules and pause the morning briefing."
 
 ## Available tools
 
@@ -281,6 +312,8 @@ mode and waits for you to click **Approve** or **Reject**.
 | Web | `web_search`, `fetch_url` |
 | Reddit | `reddit_browse`, `reddit_post_comments`, `reddit_saved` |
 | Notes | `notes_create`, `notes_append`, `notes_list`, `notes_search` |
+| Scheduler | `schedule_list`, `schedule_create`, `schedule_set_enabled`, `schedule_delete` |
+| Notifications | `notification_send` |
 
 The Gmail tools are built to keep mail cheap to read. `gmail_search` takes structured filters
 (sender, subject, label, category, unread, age, excluded senders) instead of hand-written query
@@ -308,11 +341,13 @@ Djin/
 │  ├─ config.py             # settings loaded from .env
 │  ├─ llm.py                # OpenAI-compatible client (OpenAI + OpenRouter)
 │  ├─ server.py             # FastAPI app and HTTP API
+│  ├─ scheduler.py          # persistent cron jobs and unattended turns
+│  ├─ notifications.py      # optional ntfy push delivery
 │  ├─ voice.py              # optional server-side speech-to-text and text-to-speech
 │  ├─ integrations/         # Google and Reddit OAuth
 │  ├─ storage/              # SQLite database and encrypted token vault
 │  ├─ static/               # chat and voice UI
-│  └─ tools/                # the 17 tools, grouped by service
+│  └─ tools/                # the 22 tools, grouped by service
 ├─ data/                    # database, notes, encryption key (git-ignored)
 ├─ .env                     # your secrets (git-ignored)
 ├─ .env.example             # template
@@ -361,6 +396,10 @@ Open Djin at <http://127.0.0.1:8765> and allow the permission prompt.
   is never uploaded. Setting `DJIN_STT_PROVIDER` or `DJIN_TTS_PROVIDER` to `openai` sends audio
   to `DJIN_VOICE_BASE_URL`.
 - Voice can start a turn but can never approve one; approvals always require a click.
+- Scheduled turns default to read-only. Their tool schemas omit higher-risk tools, and the agent
+  independently blocks and audits any out-of-policy call the model still attempts.
+- ntfy is opt-in. Scheduled results sent through a hosted ntfy server leave the computer and may
+  contain information from email, calendars or notes; use a private, unguessable topic or self-host.
 - `fetch_url` refuses private, loopback and link-local addresses and re-checks every redirect
   hop, so the model cannot reach your router or localhost services.
 - The chat UI renders all text as plain text, so retrieved content cannot inject markup.

@@ -32,6 +32,7 @@ def _logout(service: str) -> int:
 def _status() -> int:
     db.init_db()
     settings = get_settings()
+    schedules = db.list_schedules()
     from djin.integrations import google_auth, reddit_auth
 
     def mark(value: bool) -> str:
@@ -43,6 +44,12 @@ def _status() -> int:
     print(f"Reddit config   : {mark(settings.reddit_configured)}   connected: {mark(reddit_auth.is_connected())}")
     print(f"Search          : {settings.search_provider} (configured: {mark(settings.search_configured)})")
     print(f"Notes folder    : {settings.notes_dir}")
+    print(
+        f"Scheduler       : {mark(settings.scheduler_enabled)}"
+        f" ({sum(item['enabled'] for item in schedules)} enabled, {len(schedules)} saved;"
+        f" timezone: {settings.scheduler_timezone})"
+    )
+    print(f"ntfy push       : configured: {mark(settings.ntfy_configured)}")
     print(f"Database        : {settings.db_path}")
     print(f"Auto-approve write actions: {mark(settings.auto_approve_write)}")
     return 0
