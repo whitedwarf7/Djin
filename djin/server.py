@@ -301,10 +301,12 @@ def conversations(limit: int = 30) -> list[dict[str, Any]]:
 
 @api.get("/conversations/{conversation_id}")
 def conversation(conversation_id: str) -> dict[str, Any]:
-    if not db.conversation_exists(conversation_id):
+    metadata = db.get_conversation(conversation_id)
+    if metadata is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {
         "conversation_id": conversation_id,
+        "title": metadata["title"],
         "messages": db.get_messages(conversation_id),
         "pending": db.list_pending_actions(conversation_id),
     }

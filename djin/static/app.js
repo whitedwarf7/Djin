@@ -7,11 +7,9 @@ const input = document.getElementById("input");
 const sendButton = document.getElementById("send");
 const sendLabel = sendButton.querySelector(".label");
 const statusBar = document.getElementById("status");
-const sessionId = document.getElementById("session-id");
-const modelCard = document.getElementById("model-card");
+const sessionHeading = document.getElementById("session-title");
+const modelName = document.getElementById("model-name");
 const connections = document.getElementById("connections");
-const toolList = document.getElementById("tool-list");
-const toolCount = document.getElementById("tool-count");
 const appShell = document.getElementById("app-shell");
 const authView = document.getElementById("auth-view");
 const authForm = document.getElementById("auth-form");
@@ -353,8 +351,8 @@ function handleEvent(event) {
     case "start":
       if (event.conversation_id !== conversationId) {
         conversationId = event.conversation_id;
-        sessionId.textContent = String(conversationId).slice(0, 8);
       }
+      sessionHeading.textContent = event.title || "New session";
       break;
     case "delta":
       pushDelta(event.content || "");
@@ -566,7 +564,7 @@ async function deleteSession(id) {
 
 function startNewSession() {
   conversationId = null;
-  sessionId.textContent = "new";
+  sessionHeading.textContent = "New session";
   stream = null;
   activityRows.clear();
   renderApprovals([]);
@@ -628,7 +626,7 @@ async function loadSession(id) {
     if (!response.ok) throw new Error(`Could not open that session (${response.status})`);
     const data = await response.json();
     conversationId = id;
-    sessionId.textContent = id.slice(0, 8);
+    sessionHeading.textContent = data.title || "Untitled session";
     replay(data.messages);
     renderApprovals(data.pending);
     await loadSessions();
@@ -684,14 +682,8 @@ function connectionState(key, info) {
 }
 
 function renderSession(data) {
-  const name = el("div", "model-name", data.model);
-  const tags = el("div", "tags");
-  tags.appendChild(el("span", "tag", data.provider));
-  tags.appendChild(
-    el("span", data.auto_approve_write ? "tag is-warn" : "tag", data.auto_approve_write ? "writes: auto" : "writes: ask")
-  );
-  if (!data.llm_key_present) tags.appendChild(el("span", "tag is-bad", "no API key"));
-  modelCard.replaceChildren(name, tags);
+  modelName.textContent = data.model;
+  modelName.title = `${data.provider} · ${data.model}`;
 
   connections.replaceChildren();
   for (const { key, glyph, label } of CONNECTIONS) {
@@ -702,15 +694,9 @@ function renderSession(data) {
     connections.appendChild(row);
   }
 
-  toolCount.textContent = String(data.tools.length);
-  toolList.replaceChildren();
   toolRisk.clear();
   for (const tool of data.tools) {
     toolRisk.set(tool.name, tool.risk);
-    const item = el("li", "tool");
-    item.title = `${tool.risk} · ${tool.description}`;
-    item.append(el("span", `dot risk-${tool.risk}`), el("span", "tool-name", tool.name));
-    toolList.appendChild(item);
   }
 
   statusBar.replaceChildren();
@@ -763,7 +749,8 @@ async function loadStatus() {
     suggestions = suggestionsFor(data);
     if (!chat.children.length) renderEmptyState(suggestions);
   } catch {
-    modelCard.replaceChildren(el("div", "model-name", "status unavailable"));
+    modelName.textContent = "Model unavailable";
+    modelName.removeAttribute("title");
     connections.replaceChildren();
     statusBar.replaceChildren(el("span", "pill is-bad", "offline"));
   }

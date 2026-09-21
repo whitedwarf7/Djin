@@ -4,6 +4,29 @@ from djin import agent
 
 
 class AgentEventContractTests(unittest.TestCase):
+    def test_session_title_removes_request_filler(self) -> None:
+        title = agent._title_from(
+            "Hello, could you please summarize my unread emails from last week?"
+        )
+
+        self.assertEqual(title, "Summarize my unread emails from last week")
+
+    def test_session_title_skips_a_standalone_greeting(self) -> None:
+        title = agent._title_from("Hi! Please review tomorrow's calendar and flag conflicts.")
+
+        self.assertEqual(title, "Review tomorrow's calendar and flag conflicts")
+
+    def test_session_title_is_bounded_and_word_safe(self) -> None:
+        title = agent._title_from(
+            "Compare the quarterly revenue reports for Germany and France and highlight every important difference"
+        )
+
+        self.assertEqual(title, "Compare the quarterly revenue reports for Germany…")
+        self.assertLessEqual(len(title), 53)
+
+    def test_empty_session_title_has_a_useful_fallback(self) -> None:
+        self.assertEqual(agent._title_from("  \n  "), "New conversation")
+
     def test_running_tool_event_includes_call_identifier(self) -> None:
         event = agent._running_event(
             {"id": "call-123", "function": {"name": "missing_test_tool"}}

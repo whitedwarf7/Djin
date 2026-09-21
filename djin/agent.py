@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -322,13 +323,33 @@ def _stream_loop(
 
 
 def _title_from(message: str) -> str:
-    """Session titles come from the opening line; cut on a word so the rail reads cleanly."""
+    """Turn the first request into a short, scannable session title."""
     text = " ".join(message.split())
-    if len(text) <= 60:
-        return text or "New conversation"
-    clipped = text[:60]
-    head, _, _ = clipped.rpartition(" ")
-    return f"{head or clipped}\u2026"
+    if not text:
+        return "New conversation"
+
+    text = re.sub(r"^(?:hi|hello|hey)[,!:.]?\s+", "", text, flags=re.IGNORECASE)
+    text = re.split(r"(?<=[.!?])\s+", text, maxsplit=1)[0]
+    text = re.sub(
+        r"^(?:(?:can|could|would|will) you (?:please )?|please |"
+        r"i(?:'d| would) like (?:you )?to |i want (?:you )?to |"
+        r"help me (?:to )?|tell me |show me )",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = text.strip(" \t\r\n#*_-:;,.!?") or "New conversation"
+    text = text[:1].upper() + text[1:]
+
+    words = text.split()
+    shortened = len(words) > 7
+    title = " ".join(words[:7])
+    if len(title) > 52:
+        clipped = title[:52]
+        head, separator, _ = clipped.rpartition(" ")
+        title = head if separator else clipped
+        shortened = True
+    return f"{title.rstrip(' ,;:-')}\u2026" if shortened else title
 
 
 def stream_turn(
@@ -341,12 +362,15 @@ def stream_turn(
     if not user_message.strip():
         raise ValueError("Message is empty.")
 
-    if conversation_id and db.conversation_exists(conversation_id):
+    conversation = db.get_conversation(conversation_id) if conversation_id else None
+    if conversation:
         target = conversation_id
+        title = str(conversation["title"])
     else:
-        target = db.create_conversation(title=_title_from(user_message))
+        title = _title_from(user_message)
+        target = db.create_conversation(title=title)
 
-    return _stream_user_turn(target, user_message, voice, risk_ceiling)
+    return _stream_user_turn(target, user_message, voice, risk_ceiling, title)
 
 
 def _stream_user_turn(
@@ -354,8 +378,9 @@ def _stream_user_turn(
     user_message: str,
     voice: bool = False,
     risk_ceiling: Risk | None = None,
+    title: str = "New conversation",
 ) -> Iterator[dict[str, Any]]:
-    yield {"type": "start", "conversation_id": conversation_id}
+    yield {"type": "start", "conversation_id": conversation_id, "title": title}
 
     if db.list_pending_actions(conversation_id):
         yield {
@@ -389,7 +414,12 @@ def _stream_resolution(
     action: dict[str, Any], approve: bool, voice: bool = False
 ) -> Iterator[dict[str, Any]]:
     conversation_id = action["conversation_id"]
-    yield {"type": "start", "conversation_id": conversation_id}
+    conversation = db.get_conversation(conversation_id)
+    yield {
+        "type": "start",
+        "conversation_id": conversation_id,
+        "title": conversation["title"] if conversation else "New conversation",
+    }
 
     spec = get_tool(action["tool_name"])
     if spec is None:
