@@ -292,11 +292,14 @@ function fillActivity(node, event) {
 function upsertActivity(event) {
   hideThinking();
   clearEmptyState();
-  let node = event.status === "running" ? null : activityRows.get(event.tool);
+  const key = event.tool_call_id || event.tool;
+  let node = event.tool_call_id
+    ? activityRows.get(key)
+    : event.status === "running" ? null : activityRows.get(key);
   if (!node) {
     node = el("div", "activity");
     chat.appendChild(node);
-    activityRows.set(event.tool, node);
+    activityRows.set(key, node);
   }
   fillActivity(node, event);
   scrollToEnd();
@@ -577,8 +580,16 @@ function toolStatuses(messages) {
   for (const message of messages) {
     if (message.role !== "tool" || !message.tool_call_id) continue;
     const text = message.content || "";
-    const failed = /^(tool error|invalid arguments)/i.test(text) || / failed: /.test(text);
-    statuses.set(message.tool_call_id, failed ? "error" : "ok");
+    const failed = /^(tool error|invalid arguments|could not parse|unknown tool)/i.test(text)
+      || / failed: /.test(text);
+    const inferred = failed
+      ? "error"
+      : /^tool blocked by/i.test(text)
+        ? "blocked"
+        : /^the user rejected/i.test(text)
+          ? "skipped"
+          : "ok";
+    statuses.set(message.tool_call_id, message._status || inferred);
   }
   return statuses;
 }
@@ -599,9 +610,10 @@ function replay(messages) {
         fillActivity(node, {
           tool: name,
           risk: toolRisk.get(name) || "read",
-          status: statuses.get(call.id) || "ok",
+          status: statuses.get(call.id) || "unknown",
         });
         chat.appendChild(node);
+        activityRows.set(call.id || name, node);
       }
     }
   }

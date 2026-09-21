@@ -22,3 +22,9 @@ env/
 .idea/
 Thumbs.db
 desktop.ini
+
+# Generated Apple project state
+/ios/*.xcodeproj/
+/ios/DerivedData/
+xcuserdata/
+*.xcuserstate
