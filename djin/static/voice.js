@@ -412,6 +412,7 @@ const DjinVoice = (() => {
     if (!ui.mic) return;
     ui.mic.classList.toggle("active", value);
     ui.mic.setAttribute("aria-pressed", String(value));
+    ui.mic.setAttribute("aria-label", value ? "Stop voice input" : "Start voice input");
     ui.micLabel.textContent = value ? "Stop" : "Talk";
   }
 

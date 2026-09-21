@@ -7,12 +7,14 @@ const input = document.getElementById("input");
 const sendButton = document.getElementById("send");
 const sendLabel = sendButton.querySelector(".label");
 const statusBar = document.getElementById("status");
-const sessionId = document.getElementById("session-id");
-const modelCard = document.getElementById("model-card");
+const sessionHeading = document.getElementById("session-title");
+const modelName = document.getElementById("model-name");
 const connections = document.getElementById("connections");
-const toolList = document.getElementById("tool-list");
-const toolCount = document.getElementById("tool-count");
 const appShell = document.getElementById("app-shell");
+const sessionRail = document.getElementById("session-rail");
+const sessionMenuButton = document.getElementById("session-menu");
+const sessionMenuIcon = sessionMenuButton.querySelector("use");
+const sessionBackdrop = document.getElementById("session-backdrop");
 const authView = document.getElementById("auth-view");
 const authForm = document.getElementById("auth-form");
 const authTitle = document.getElementById("auth-title");
@@ -353,8 +355,8 @@ function handleEvent(event) {
     case "start":
       if (event.conversation_id !== conversationId) {
         conversationId = event.conversation_id;
-        sessionId.textContent = String(conversationId).slice(0, 8);
       }
+      sessionHeading.textContent = event.title || "New session";
       break;
     case "delta":
       pushDelta(event.content || "");
@@ -479,6 +481,7 @@ input.addEventListener("keydown", (event) => {
 
 const sessionList = document.getElementById("session-list");
 const newSessionButton = document.getElementById("new-session");
+const mobileSessions = window.matchMedia("(max-width: 760px)");
 const toolRisk = new Map();
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const STEPS = [
@@ -489,6 +492,36 @@ const STEPS = [
   ["month", 2_592_000_000],
   ["year", 31_536_000_000],
 ];
+
+function setSessionDrawer(open) {
+  const expanded = mobileSessions.matches && open;
+  if (!expanded && sessionRail.contains(document.activeElement)) {
+    sessionMenuButton.focus();
+  }
+
+  appShell.classList.toggle("sessions-open", expanded);
+  sessionMenuButton.setAttribute("aria-expanded", String(expanded));
+  sessionMenuButton.setAttribute("aria-label", expanded ? "Close sessions" : "Open sessions");
+  sessionMenuButton.title = expanded ? "Close sessions" : "Open sessions";
+  sessionMenuIcon.setAttribute("href", expanded ? "#i-close" : "#i-menu");
+  sessionBackdrop.tabIndex = expanded ? 0 : -1;
+
+  if (mobileSessions.matches) {
+    sessionRail.inert = !expanded;
+    sessionRail.setAttribute("aria-hidden", String(!expanded));
+  } else {
+    sessionRail.inert = false;
+    sessionRail.removeAttribute("aria-hidden");
+  }
+}
+
+function closeSessionDrawer() {
+  setSessionDrawer(false);
+}
+
+function syncSessionDrawer() {
+  setSessionDrawer(appShell.classList.contains("sessions-open"));
+}
 
 function relativeTime(iso) {
   const then = Date.parse(iso);
@@ -566,7 +599,7 @@ async function deleteSession(id) {
 
 function startNewSession() {
   conversationId = null;
-  sessionId.textContent = "new";
+  sessionHeading.textContent = "New session";
   stream = null;
   activityRows.clear();
   renderApprovals([]);
@@ -628,10 +661,11 @@ async function loadSession(id) {
     if (!response.ok) throw new Error(`Could not open that session (${response.status})`);
     const data = await response.json();
     conversationId = id;
-    sessionId.textContent = id.slice(0, 8);
+    sessionHeading.textContent = data.title || "Untitled session";
     replay(data.messages);
     renderApprovals(data.pending);
     await loadSessions();
+    closeSessionDrawer();
     input.focus();
   } catch (error) {
     addMessage("error", error.message);
@@ -648,7 +682,29 @@ async function loadSessions() {
   }
 }
 
-newSessionButton.addEventListener("click", startNewSession);
+sessionMenuButton.addEventListener("click", () => {
+  const opening = !appShell.classList.contains("sessions-open");
+  setSessionDrawer(opening);
+  if (opening) {
+    requestAnimationFrame(() => {
+      (sessionList.querySelector(".session-open") || newSessionButton).focus();
+    });
+  }
+});
+
+sessionBackdrop.addEventListener("click", closeSessionDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && appShell.classList.contains("sessions-open")) {
+    closeSessionDrawer();
+  }
+});
+mobileSessions.addEventListener("change", syncSessionDrawer);
+syncSessionDrawer();
+
+newSessionButton.addEventListener("click", () => {
+  startNewSession();
+  closeSessionDrawer();
+});
 
 // ------------------------------------------------------------------ session panel
 
@@ -684,14 +740,8 @@ function connectionState(key, info) {
 }
 
 function renderSession(data) {
-  const name = el("div", "model-name", data.model);
-  const tags = el("div", "tags");
-  tags.appendChild(el("span", "tag", data.provider));
-  tags.appendChild(
-    el("span", data.auto_approve_write ? "tag is-warn" : "tag", data.auto_approve_write ? "writes: auto" : "writes: ask")
-  );
-  if (!data.llm_key_present) tags.appendChild(el("span", "tag is-bad", "no API key"));
-  modelCard.replaceChildren(name, tags);
+  modelName.textContent = data.model;
+  modelName.title = `${data.provider} · ${data.model}`;
 
   connections.replaceChildren();
   for (const { key, glyph, label } of CONNECTIONS) {
@@ -702,15 +752,9 @@ function renderSession(data) {
     connections.appendChild(row);
   }
 
-  toolCount.textContent = String(data.tools.length);
-  toolList.replaceChildren();
   toolRisk.clear();
   for (const tool of data.tools) {
     toolRisk.set(tool.name, tool.risk);
-    const item = el("li", "tool");
-    item.title = `${tool.risk} · ${tool.description}`;
-    item.append(el("span", `dot risk-${tool.risk}`), el("span", "tool-name", tool.name));
-    toolList.appendChild(item);
   }
 
   statusBar.replaceChildren();
@@ -763,7 +807,8 @@ async function loadStatus() {
     suggestions = suggestionsFor(data);
     if (!chat.children.length) renderEmptyState(suggestions);
   } catch {
-    modelCard.replaceChildren(el("div", "model-name", "status unavailable"));
+    modelName.textContent = "Model unavailable";
+    modelName.removeAttribute("title");
     connections.replaceChildren();
     statusBar.replaceChildren(el("span", "pill is-bad", "offline"));
   }

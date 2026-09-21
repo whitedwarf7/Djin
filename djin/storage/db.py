@@ -182,6 +182,15 @@ def conversation_exists(conversation_id: str) -> bool:
     return row is not None
 
 
+def get_conversation(conversation_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id, title, created_at, updated_at FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def append_message(conversation_id: str, payload: dict[str, Any]) -> None:
     now = utcnow()
     with connect() as conn:

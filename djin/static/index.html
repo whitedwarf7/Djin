@@ -37,6 +37,9 @@
       <g id="i-close" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" />
       </g>
+      <g id="i-menu" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M4 7h16M4 12h16M4 17h16" />
+      </g>
       <g id="i-shield" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 3.2 19 6v5.4c0 4.2-2.9 7.6-7 8.4-4.1-.8-7-4.2-7-8.4V6l7-2.8Z" />
         <path d="m9.2 12.2 2 2.1 3.8-4" />
@@ -196,70 +199,56 @@
   </main>
 
   <div id="app-shell" class="shell hidden">
-    <aside class="rail" aria-label="Session details">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><use href="#i-lamp" /></svg>
-        </span>
-        <span class="brand-text">
-          <span class="brand-name">Djin</span>
-          <span class="brand-sub">runs on your machine</span>
-        </span>
+    <aside id="session-rail" class="rail" aria-label="Sessions">
+      <div class="rail-head">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><use href="#i-lamp" /></svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">Djin</span>
+            <span class="brand-sub">personal assistant</span>
+          </span>
+        </div>
+        <button type="button" id="new-session" class="new-session" title="Start a new session">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
+          <span>New</span>
+        </button>
       </div>
 
-      <section class="rail-block">
-        <h2 class="rail-title"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chip" /></svg>Model</h2>
-        <div id="model-card" class="model-card">
-          <span class="skeleton" style="width: 72%"></span>
-          <span class="skeleton" style="width: 44%"></span>
-        </div>
-      </section>
-
-      <section class="rail-block">
-        <h2 class="rail-title"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link" /></svg>Connections</h2>
-        <ul id="connections" class="connections">
-          <li><span class="skeleton" style="width: 80%"></span></li>
-          <li><span class="skeleton" style="width: 62%"></span></li>
-          <li><span class="skeleton" style="width: 70%"></span></li>
-        </ul>
-      </section>
-
-      <section class="rail-block sessions">
-        <h2 class="rail-title">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-history" /></svg>
-          <span>Sessions</span>
-          <button type="button" id="new-session" class="ghost" title="Start a new session">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>
-            <span class="sr-only">Start a new session</span>
-          </button>
-        </h2>
+      <section class="sessions">
+        <h2 class="rail-title">Sessions</h2>
         <ul id="session-list" class="session-list"></ul>
       </section>
-
-      <details class="rail-block tools" id="tools-block">
-        <summary class="rail-title">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sliders" /></svg>
-          <span>Capabilities</span>
-          <span id="tool-count" class="count"></span>
-          <svg viewBox="0 0 24 24" aria-hidden="true" class="marker"><use href="#i-chevron" /></svg>
-        </summary>
-        <ul id="tool-list" class="tool-list"></ul>
-      </details>
-
-      <div class="rail-foot">
-        <p><kbd>Enter</kbd> send · <kbd>Shift</kbd><kbd>Enter</kbd> newline</p>
-        <p><kbd>Ctrl</kbd><kbd>Space</kbd> talk · <kbd>Esc</kbd> stop</p>
-      </div>
     </aside>
+    <button type="button" id="session-backdrop" class="session-backdrop" aria-label="Close sessions"></button>
 
     <main class="stage">
       <header class="topbar">
-        <div class="session">
-          <span class="session-label">Session</span>
-          <span id="session-id" class="session-id">new</span>
+        <button type="button" id="session-menu" class="session-menu" aria-expanded="false" aria-controls="session-rail" title="Open sessions" aria-label="Open sessions">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-menu" /></svg>
+        </button>
+        <div class="conversation-context">
+          <span id="session-title" class="session-heading">New session</span>
+          <span id="model-name" class="model-pill">Loading model</span>
         </div>
         <div class="topbar-actions">
           <div id="status" class="status" role="status"></div>
+          <details id="connections-menu" class="connections-menu">
+            <summary class="connections-trigger" title="Connections">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-link" /></svg>
+              <span>Connections</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true" class="marker"><use href="#i-chevron" /></svg>
+            </summary>
+            <div class="connections-panel">
+              <h2>Connections</h2>
+              <ul id="connections" class="connections">
+                <li><span class="skeleton" style="width: 80%"></span></li>
+                <li><span class="skeleton" style="width: 62%"></span></li>
+                <li><span class="skeleton" style="width: 70%"></span></li>
+              </ul>
+            </div>
+          </details>
           <div class="account">
             <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-user" /></svg>
             <span id="account-name" class="account-name"></span>
@@ -287,15 +276,29 @@
 
           <div class="composer-bar">
             <div id="voice-bar" class="voice-bar hidden">
-              <button type="button" id="mic" class="mic" aria-pressed="false" title="Talk (Ctrl+Space)">
+              <button type="button" id="mic" class="mic" aria-pressed="false" aria-label="Start voice input" title="Talk (Ctrl+Space)">
                 <span class="mic-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24"><use href="#i-mic" /></svg>
                   <span class="wave"><i></i><i></i><i></i></span>
                 </span>
                 <span class="label">Talk</span>
               </button>
-              <label class="toggle"><input type="checkbox" id="hands-free" /><span>Hands-free</span></label>
-              <label class="toggle"><input type="checkbox" id="speak-replies" checked /><span>Speak replies</span></label>
+              <details id="voice-options" class="voice-options">
+                <summary title="Voice options">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sliders" /></svg>
+                  <span>Voice options</span>
+                </summary>
+                <div class="voice-menu">
+                  <label class="voice-option">
+                    <span class="voice-option-copy"><strong>Hands-free</strong><small>Listen again after each reply</small></span>
+                    <span class="switch-control"><input type="checkbox" id="hands-free" /><span aria-hidden="true"></span></span>
+                  </label>
+                  <label class="voice-option">
+                    <span class="voice-option-copy"><strong>Speak replies</strong><small>Read assistant responses aloud</small></span>
+                    <span class="switch-control"><input type="checkbox" id="speak-replies" checked /><span aria-hidden="true"></span></span>
+                  </label>
+                </div>
+              </details>
               <span id="voice-status" class="voice-status" aria-live="polite"></span>
             </div>
 
