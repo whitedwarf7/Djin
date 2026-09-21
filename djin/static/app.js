@@ -10,6 +10,15 @@ const statusBar = document.getElementById("status");
 const sessionHeading = document.getElementById("session-title");
 const modelName = document.getElementById("model-name");
 const connections = document.getElementById("connections");
+const connectionsMenu = document.getElementById("connections-menu");
+const notesDisclosure = document.getElementById("notes-disclosure");
+const noteState = document.getElementById("note-state");
+const noteOverview = document.getElementById("note-overview");
+const noteList = document.getElementById("note-list");
+const schedulesDisclosure = document.getElementById("schedules-disclosure");
+const scheduleState = document.getElementById("schedule-state");
+const scheduleOverview = document.getElementById("schedule-overview");
+const scheduleList = document.getElementById("schedule-list");
 const appShell = document.getElementById("app-shell");
 const sessionRail = document.getElementById("session-rail");
 const sessionMenuButton = document.getElementById("session-menu");
@@ -47,6 +56,8 @@ let busy = false;
 let suggestions = [];
 let authMode = "login";
 let appStarted = false;
+let schedulerOperational = false;
+let schedulerStatusText = "Loading";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -428,6 +439,7 @@ async function decide(actionId, approve) {
     endAssistant();
     setBusy(false);
     DjinVoice.turnEnded();
+    await refreshWorkspaceData();
   }
 }
 
@@ -454,7 +466,7 @@ async function sendMessage(message, spoken) {
     setBusy(false);
     DjinVoice.turnEnded();
     if (!spoken) input.focus();
-    loadSessions();
+    await refreshWorkspaceData();
   }
 }
 
@@ -711,8 +723,6 @@ newSessionButton.addEventListener("click", () => {
 const CONNECTIONS = [
   { key: "google", glyph: "mail", label: "Google" },
   { key: "search", glyph: "search", label: "Web search" },
-  { key: "notes", glyph: "note", label: "Notes" },
-  { key: "scheduler", glyph: "history", label: "Schedules" },
   { key: "notifications", glyph: "send", label: "Push" },
 ];
 
@@ -723,7 +733,6 @@ function connectionState(key, info) {
       ? { on: true, text: info.provider || "ready" }
       : { on: false, text: "not set up" };
   }
-  if (key === "notes") return { on: true, text: "local" };
   if (key === "scheduler") {
     if (!info.configured) return { on: false, text: "disabled" };
     if (!info.connected) return { on: false, text: "stopped" };
@@ -739,6 +748,276 @@ function connectionState(key, info) {
   return { on: false, text: info.configured ? "sign in" : "not set up" };
 }
 
+function noteSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function noteSource(source) {
+  const item = el("li");
+  try {
+    const url = new URL(source);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+    const link = el("a", null, source);
+    link.href = url.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    item.appendChild(link);
+  } catch {
+    item.textContent = source;
+  }
+  return item;
+}
+
+async function loadNoteContent(note, body) {
+  if (body.dataset.loaded || body.getAttribute("aria-busy") === "true") return;
+  body.setAttribute("aria-busy", "true");
+  body.replaceChildren(el("p", "note-loading", "Loading note…"));
+  try {
+    const response = await apiFetch(`/api/notes/${encodeURIComponent(note.filename)}`);
+    if (!response.ok) throw new Error();
+    const detail = await response.json();
+    const metadata = el("div", "note-metadata");
+    metadata.append(
+      el("span", null, detail.filename),
+      el("span", null, noteSize(detail.size_bytes))
+    );
+    body.replaceChildren(metadata);
+
+    if (detail.sources.length) {
+      const sources = el("details", "note-sources");
+      sources.appendChild(el("summary", null, detail.sources.length === 1 ? "1 source" : `${detail.sources.length} sources`));
+      const sourceList = el("ul");
+      for (const source of detail.sources) sourceList.appendChild(noteSource(source));
+      sources.appendChild(sourceList);
+      body.appendChild(sources);
+    }
+
+    const markdown = el("div", "body note-markdown");
+    if (detail.content.trim()) markdown.appendChild(renderMarkdown(detail.content));
+    else markdown.appendChild(el("p", "note-empty", "This note is empty."));
+    body.appendChild(markdown);
+    if (detail.truncated) {
+      body.appendChild(el("p", "note-truncated", "This preview stops at 200,000 characters."));
+    }
+    body.dataset.loaded = "true";
+  } catch {
+    body.replaceChildren(el("p", "note-error", "Could not load this note."));
+  } finally {
+    body.removeAttribute("aria-busy");
+  }
+}
+
+function renderNotes(notes) {
+  noteList.replaceChildren();
+  noteState.textContent = notes.length ? `${notes.length} notes` : "None";
+  noteOverview.textContent = notes.length === 1 ? "1 note" : `${notes.length} notes`;
+
+  if (!notes.length) {
+    noteList.appendChild(el("p", "note-empty", "No notes yet."));
+    return;
+  }
+
+  for (const note of notes) {
+    const card = el("details", "note-card");
+    const summary = el("summary", "note-card-summary");
+    const head = el("div", "note-card-head");
+    const meta = el("span", "note-card-meta");
+    const marker = icon("chevron");
+    marker.classList.add("marker");
+    meta.append(el("span", "note-modified", relativeTime(note.modified_at)), marker);
+    head.append(
+      el("h4", null, note.title),
+      meta
+    );
+    summary.appendChild(head);
+    summary.appendChild(el("p", "note-excerpt", note.excerpt || "No preview available."));
+
+    if (note.tags.length) {
+      const tags = el("div", "note-tags");
+      for (const tag of note.tags) tags.appendChild(el("span", null, tag));
+      summary.appendChild(tags);
+    }
+
+    const body = el("div", "note-content");
+    card.append(summary, body);
+    card.addEventListener("toggle", () => {
+      if (card.open) loadNoteContent(note, body);
+    });
+    noteList.appendChild(card);
+  }
+}
+
+async function loadNotes() {
+  noteList.setAttribute("aria-busy", "true");
+  try {
+    const response = await apiFetch("/api/notes?limit=100");
+    if (!response.ok) throw new Error();
+    renderNotes(await response.json());
+  } catch {
+    noteState.textContent = "Unavailable";
+    noteOverview.textContent = "";
+    noteList.replaceChildren(el("p", "note-empty", "Notes unavailable."));
+  } finally {
+    noteList.removeAttribute("aria-busy");
+  }
+}
+
+notesDisclosure.addEventListener("toggle", () => {
+  if (notesDisclosure.open) loadNotes();
+});
+
+function scheduleDate(iso, timezone) {
+  if (!iso) return "Not scheduled";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  const options = {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  };
+  if (timezone && timezone !== "local") options.timeZone = timezone;
+  try {
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date);
+  }
+}
+
+function schedulePattern(cron) {
+  const [minute, hour, day, month, weekday] = cron.trim().split(/\s+/);
+  if (!weekday) return cron;
+  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && day === "*" && month === "*") {
+    const time = `${String(Number(hour)).padStart(2, "0")}:${String(Number(minute)).padStart(2, "0")}`;
+    if (weekday === "*") return `Every day at ${time}`;
+    if (weekday.toLowerCase() === "mon-fri") return `Weekdays at ${time}`;
+  }
+  const minuteStep = minute.match(/^\*\/(\d+)$/);
+  if (minuteStep && hour === "*" && day === "*" && month === "*" && weekday === "*") {
+    return `Every ${minuteStep[1]} minutes`;
+  }
+  return `Custom · ${cron}`;
+}
+
+function scheduleFact(label, value) {
+  const row = el("div", "schedule-fact");
+  row.append(el("dt", null, label), el("dd", null, value));
+  return row;
+}
+
+function renderSchedules(schedules) {
+  scheduleList.replaceChildren();
+  const enabled = schedules.filter((schedule) => schedule.enabled).length;
+  scheduleState.textContent = schedulerOperational
+    ? schedules.length ? `${enabled} active` : "None"
+    : schedulerStatusText;
+  scheduleOverview.textContent = schedules.length === 1
+    ? "1 schedule"
+    : `${schedules.length} schedules`;
+
+  if (!schedules.length) {
+    scheduleList.appendChild(el("p", "schedule-empty", "No schedules yet."));
+    return;
+  }
+
+  const statusNames = {
+    ok: "Completed",
+    pending: "Needs approval",
+    error: "Failed",
+    delivery_error: "Delivery failed",
+  };
+
+  for (const schedule of schedules) {
+    const card = el("article", "schedule-card");
+
+    const head = el("div", "schedule-card-head");
+    const badgeState = schedule.enabled
+      ? schedulerOperational ? "is-active" : "is-enabled"
+      : "is-paused";
+    const badgeText = schedule.enabled
+      ? schedulerOperational ? "Active" : "Enabled"
+      : "Paused";
+    head.append(
+      el("h4", null, schedule.name),
+      el("span", `schedule-badge ${badgeState}`, badgeText)
+    );
+    card.appendChild(head);
+
+    const prompt = el("details", "schedule-prompt");
+    prompt.append(el("summary", null, "Instruction"), el("p", null, schedule.prompt));
+    card.appendChild(prompt);
+
+    const facts = el("dl", "schedule-facts");
+    facts.append(
+      scheduleFact("Repeats", schedulePattern(schedule.cron)),
+      scheduleFact("Next", schedule.enabled ? scheduleDate(schedule.next_run_at, schedule.timezone) : "Paused"),
+      scheduleFact("Timezone", schedule.timezone === "local" ? "Local time" : schedule.timezone),
+      scheduleFact("Access", schedule.risk_ceiling === "write" ? "Read and write" : "Read only"),
+      scheduleFact("Delivery", schedule.notify ? "Push notification" : "Saved locally"),
+      scheduleFact(
+        "Last run",
+        schedule.last_run_at
+          ? `${statusNames[schedule.last_status] || schedule.last_status || "Finished"} · ${relativeTime(schedule.last_run_at)}`
+          : "Not run yet"
+      )
+    );
+    card.appendChild(facts);
+
+    if (schedule.last_error) {
+      card.appendChild(el("p", "schedule-error", schedule.last_error));
+    }
+
+    if (schedule.last_conversation_id) {
+      const lastRun = el("button", "schedule-last-run");
+      lastRun.type = "button";
+      lastRun.append(icon("history"), el("span", null, "Open last run"));
+      lastRun.onclick = async () => {
+        connectionsMenu.open = false;
+        schedulesDisclosure.open = false;
+        await loadSession(schedule.last_conversation_id);
+      };
+      card.appendChild(lastRun);
+    }
+
+    scheduleList.appendChild(card);
+  }
+}
+
+async function loadSchedules() {
+  scheduleList.setAttribute("aria-busy", "true");
+  try {
+    const response = await apiFetch("/api/schedules");
+    if (!response.ok) throw new Error();
+    renderSchedules(await response.json());
+  } catch {
+    scheduleState.textContent = "Unavailable";
+    scheduleOverview.textContent = "";
+    scheduleList.replaceChildren(el("p", "schedule-empty", "Schedules unavailable."));
+  } finally {
+    scheduleList.removeAttribute("aria-busy");
+  }
+}
+
+async function refreshWorkspaceData() {
+  await Promise.all([loadStatus(), loadSessions(), loadNotes(), loadSchedules()]);
+}
+
+schedulesDisclosure.addEventListener("toggle", () => {
+  if (schedulesDisclosure.open) loadSchedules();
+});
+
+connectionsMenu.addEventListener("toggle", () => {
+  if (connectionsMenu.open && notesDisclosure.open) loadNotes();
+  if (connectionsMenu.open && schedulesDisclosure.open) loadSchedules();
+});
+
 function renderSession(data) {
   modelName.textContent = data.model;
   modelName.title = `${data.provider} · ${data.model}`;
@@ -751,6 +1030,13 @@ function renderSession(data) {
     row.append(icon(glyph), el("span", "conn-name", label), el("span", "conn-state", text));
     connections.appendChild(row);
   }
+
+  const schedulerInfo = data.integrations.scheduler;
+  const schedulerState = connectionState("scheduler", schedulerInfo);
+  schedulerOperational = schedulerState.on;
+  schedulerStatusText = schedulerState.text;
+  scheduleState.textContent = schedulerState.text;
+  schedulesDisclosure.classList.toggle("is-off", !schedulerState.on);
 
   toolRisk.clear();
   for (const tool of data.tools) {
@@ -810,6 +1096,9 @@ async function loadStatus() {
     modelName.textContent = "Model unavailable";
     modelName.removeAttribute("title");
     connections.replaceChildren();
+    schedulerOperational = false;
+    schedulerStatusText = "Unavailable";
+    scheduleState.textContent = schedulerStatusText;
     statusBar.replaceChildren(el("span", "pill is-bad", "offline"));
   }
 }
@@ -825,7 +1114,7 @@ async function enterApp(user) {
     DjinVoice.init({ send: sendMessage, isBusy: () => busy });
     autoGrow();
   }
-  await Promise.all([loadStatus(), loadSessions()]);
+  await Promise.all([loadStatus(), loadSessions(), loadNotes(), loadSchedules()]);
   input.focus();
 }
 

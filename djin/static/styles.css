@@ -663,15 +663,165 @@ kbd {
   z-index: 20;
   top: calc(100% + 8px);
   right: 0;
-  width: min(320px, calc(100vw - 24px));
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(680px, calc(100dvh - 80px));
   padding: 14px 16px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   background: rgba(20, 23, 29, 0.98);
   box-shadow: var(--shadow-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .connections-panel h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+
+.notes-disclosure,
+.schedules-disclosure {
+  margin: 10px -8px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.notes-disclosure > summary,
+.schedules-disclosure > summary { list-style: none; }
+.notes-disclosure > summary::-webkit-details-marker,
+.schedules-disclosure > summary::-webkit-details-marker { display: none; }
+
+.note-trigger,
+.schedule-trigger {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  color: var(--text-mute);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color var(--fast) ease, color var(--fast) ease;
+}
+
+.note-trigger:hover,
+.notes-disclosure[open] > .note-trigger,
+.schedule-trigger:hover,
+.schedules-disclosure[open] > .schedule-trigger { background: var(--surface-2); color: var(--text); }
+.note-trigger .conn-name,
+.schedule-trigger .conn-name { color: var(--text); }
+.note-trigger .marker,
+.schedule-trigger .marker { width: 12px; height: 12px; transition: transform var(--base) var(--ease); }
+.notes-disclosure[open] .note-trigger .marker,
+.schedules-disclosure[open] .schedule-trigger .marker { transform: rotate(90deg); }
+.schedules-disclosure.is-off .schedule-trigger .conn-name { color: var(--text-dim); }
+
+.note-details,
+.schedule-details { padding: 10px 8px 4px; }
+.note-details-head,
+.schedule-details-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+.note-details-head h3,
+.schedule-details-head h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.note-details-head span,
+.schedule-details-head span { color: var(--text-mute); font-size: 11px; }
+.note-list,
+.schedule-list { display: flex; flex-direction: column; gap: 8px; }
+
+.note-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  overflow: hidden;
+}
+
+.note-card > summary { list-style: none; }
+.note-card > summary::-webkit-details-marker { display: none; }
+.note-card-summary { min-height: 44px; padding: 10px 11px; cursor: pointer; transition: background-color var(--fast) ease; }
+.note-card-summary:hover,
+.note-card[open] > .note-card-summary { background: var(--surface); }
+.note-card[open] > .note-card-summary { border-bottom: 1px solid var(--line); }
+.note-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.note-card h4 { min-width: 0; margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.note-card-meta { display: flex; flex: none; align-items: center; gap: 5px; color: var(--text-mute); }
+.note-modified { font-size: 10px; white-space: nowrap; }
+.note-card-meta .marker { width: 12px; height: 12px; transition: transform var(--base) var(--ease); }
+.note-card[open] .note-card-meta .marker { transform: rotate(90deg); }
+
+.note-excerpt {
+  display: -webkit-box;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.note-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.note-tags span { padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--text-mute); font-size: 10px; }
+.note-content { padding: 11px; }
+.note-metadata { display: flex; justify-content: space-between; gap: 10px; color: var(--text-mute); font: 10px/1.4 var(--font-mono); }
+.note-metadata span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note-metadata span:last-child { flex: none; }
+
+.note-sources { margin-top: 9px; }
+.note-sources > summary { width: fit-content; color: var(--text-dim); cursor: pointer; font-size: 11px; }
+.note-sources ul { margin: 6px 0 0; padding-left: 18px; color: var(--text-mute); font: 10px/1.5 var(--font-mono); }
+.note-sources li { margin: 3px 0; overflow-wrap: anywhere; }
+.note-sources a { color: var(--brass-soft); text-underline-offset: 2px; }
+
+.note-markdown { margin-top: 12px; color: var(--text-dim); font-size: 12px; }
+.note-markdown h1, .note-markdown h2, .note-markdown h3 { color: var(--text); }
+.note-loading, .note-empty, .note-truncated { margin: 6px 0 2px; color: var(--text-mute); font-size: 12px; }
+.note-error { margin: 0; color: var(--danger); font-size: 12px; }
+.note-truncated { margin-top: 10px; color: var(--brass-soft); }
+
+.schedule-card {
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+
+.schedule-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.schedule-card h4 { min-width: 0; margin: 0; font-size: 13px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+
+.schedule-badge {
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--text-mute);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.schedule-badge.is-active { border-color: rgba(95, 185, 138, 0.32); background: var(--ok-wash); color: var(--ok); }
+.schedule-badge.is-enabled { border-color: rgba(224, 169, 63, 0.36); background: var(--brass-wash); color: var(--brass-soft); }
+
+.schedule-prompt { margin-top: 7px; }
+.schedule-prompt > summary { width: fit-content; color: var(--text-dim); cursor: pointer; font-size: 11px; }
+.schedule-prompt > summary:hover { color: var(--text); }
+.schedule-prompt p { margin: 7px 0 0; color: var(--text-dim); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.schedule-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 11px 0 0; }
+.schedule-fact { min-width: 0; }
+.schedule-fact dt { color: var(--text-mute); font-size: 10px; }
+.schedule-fact dd { margin: 1px 0 0; color: var(--text-dim); font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+
+.schedule-error { margin: 10px 0 0; padding: 7px 8px; border-left: 2px solid var(--danger); background: var(--danger-wash); color: #ffd3d6; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.schedule-empty { margin: 6px 0 2px; color: var(--text-mute); font-size: 12px; }
+
+.schedule-last-run {
+  min-height: 44px;
+  margin-top: 10px;
+  padding: 7px 10px;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--text-dim);
+}
+
+.schedule-last-run svg { width: 14px; height: 14px; }
 
 .account {
   display: flex;
