@@ -17,7 +17,7 @@ from djin import agent, auth, scheduler, voice
 from djin.config import get_settings
 from djin.integrations import google_auth
 from djin.storage import db
-from djin.tools import REGISTRY
+from djin.tools import REGISTRY, notes_tools
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 MAX_TTS_CHARS = voice.MAX_TTS_CHARS
@@ -79,6 +79,26 @@ def _sse(events: Iterator[dict[str, Any]]) -> Iterator[str]:
 
 def _public_user(user: auth.AuthenticatedUser) -> dict[str, str]:
     return {"id": user.id, "username": user.username, "role": user.role}
+
+
+def _public_schedule(schedule_item: dict[str, Any]) -> dict[str, Any]:
+    fields = (
+        "id",
+        "name",
+        "prompt",
+        "cron",
+        "timezone",
+        "risk_ceiling",
+        "notify",
+        "enabled",
+        "next_run_at",
+        "last_run_at",
+        "last_status",
+        "last_error",
+        "last_conversation_id",
+        "created_at",
+    )
+    return {field: schedule_item[field] for field in fields}
 
 
 def _issue_token(response: Response, user: auth.AuthenticatedUser) -> dict[str, Any]:
@@ -297,6 +317,24 @@ def voice_speak(request: SpeakRequest) -> Response:
 @api.get("/conversations")
 def conversations(limit: int = 30) -> list[dict[str, Any]]:
     return db.list_conversations(limit=min(limit, 100))
+
+
+@api.get("/schedules")
+def schedules() -> list[dict[str, Any]]:
+    return [_public_schedule(item) for item in db.list_schedules()]
+
+
+@api.get("/notes")
+def notes(limit: int = 100) -> list[dict[str, Any]]:
+    return notes_tools.list_note_documents(limit=min(limit, 100))
+
+
+@api.get("/notes/{filename}")
+def note(filename: str) -> dict[str, Any]:
+    try:
+        return notes_tools.read_note_document(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Note not found") from exc
 
 
 @api.get("/conversations/{conversation_id}")

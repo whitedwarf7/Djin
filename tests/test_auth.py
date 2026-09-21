@@ -34,6 +34,7 @@ class AuthenticationApiTests(unittest.TestCase):
         cls.app = app
         cls.auth = auth
         cls.db = db
+        cls.get_settings = staticmethod(get_settings)
         cls.client_context = TestClient(
             app,
             base_url="http://127.0.0.1:8765",
@@ -68,6 +69,9 @@ class AuthenticationApiTests(unittest.TestCase):
             ("POST", "/api/voice/transcribe", None),
             ("POST", "/api/voice/speak", {"text": "hello"}),
             ("GET", "/api/conversations", None),
+            ("GET", "/api/schedules", None),
+            ("GET", "/api/notes", None),
+            ("GET", "/api/notes/missing.md", None),
             ("GET", "/api/conversations/missing", None),
             ("DELETE", "/api/conversations/missing", None),
             ("GET", "/api/audit", None),
@@ -173,6 +177,79 @@ class AuthenticationApiTests(unittest.TestCase):
             json={"username": "OWNER", "password": "correct horse battery staple"},
         )
         self.assertEqual(valid.status_code, 200)
+
+        schedule = self.db.create_schedule(
+            name="Weekday briefing",
+            prompt="Summarize unread mail and tomorrow's calendar.",
+            cron="0 7 * * 1-5",
+            timezone_name="Europe/Berlin",
+            risk_ceiling="read",
+            notify=True,
+        )
+        self.db.set_schedule_next_run(schedule["id"], "2026-09-22T05:00:00+00:00")
+        schedules = self.client.get("/api/schedules")
+        self.assertEqual(schedules.status_code, 200)
+        self.assertEqual(
+            schedules.json(),
+            [
+                {
+                    "id": schedule["id"],
+                    "name": "Weekday briefing",
+                    "prompt": "Summarize unread mail and tomorrow's calendar.",
+                    "cron": "0 7 * * 1-5",
+                    "timezone": "Europe/Berlin",
+                    "risk_ceiling": "read",
+                    "notify": True,
+                    "enabled": True,
+                    "next_run_at": "2026-09-22T05:00:00+00:00",
+                    "last_run_at": None,
+                    "last_status": None,
+                    "last_error": None,
+                    "last_conversation_id": None,
+                    "created_at": schedule["created_at"],
+                }
+            ],
+        )
+
+        notes_dir = self.get_settings().notes_dir
+        note_path = notes_dir / "2026-09-21-project-plan.md"
+        note_path.write_text(
+            "---\n"
+            "title: Project plan\n"
+            "created: 2026-09-21T08:30:00\n"
+            "tags: [planning, work]\n"
+            "sources:\n"
+            "  - https://example.com/brief\n"
+            "---\n\n"
+            "# Project plan\n\n"
+            "Review the **launch checklist** and assign owners.\n",
+            encoding="utf-8",
+        )
+        scratch_path = notes_dir / "scratch.md"
+        scratch_path.write_text("# Scratch pad\n\nA note without front matter.\n", encoding="utf-8")
+
+        notes = self.client.get("/api/notes")
+        self.assertEqual(notes.status_code, 200)
+        notes_by_name = {item["filename"]: item for item in notes.json()}
+        self.assertEqual(notes_by_name[note_path.name]["title"], "Project plan")
+        self.assertEqual(notes_by_name[note_path.name]["tags"], ["planning", "work"])
+        self.assertEqual(
+            notes_by_name[note_path.name]["sources"], ["https://example.com/brief"]
+        )
+        self.assertEqual(
+            notes_by_name[note_path.name]["excerpt"],
+            "Review the launch checklist and assign owners.",
+        )
+        self.assertEqual(notes_by_name[scratch_path.name]["title"], "Scratch pad")
+
+        note = self.client.get(f"/api/notes/{note_path.name}")
+        self.assertEqual(note.status_code, 200)
+        self.assertEqual(
+            note.json()["content"],
+            "Review the **launch checklist** and assign owners.\n",
+        )
+        self.assertFalse(note.json()["truncated"])
+        self.assertEqual(self.client.get("/api/notes/missing.md").status_code, 404)
 
         bearer_headers = {"Authorization": f"Bearer {owner_token}"}
         self.assertEqual(

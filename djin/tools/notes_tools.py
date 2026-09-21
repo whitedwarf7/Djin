@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import csv
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from djin.config import get_settings
 from djin.tools.registry import Risk, ToolError, register, wrap_untrusted
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 MAX_NOTE_CHARS = 60000
+MAX_NOTE_READ_CHARS = 200000
 
 
 def _notes_dir() -> Path:
@@ -34,6 +37,102 @@ def _resolve(filename: str) -> Path:
     if path.parent != root:
         raise ToolError("Notes must live directly inside the notes folder.")
     return path
+
+
+def _scalar(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+        return value[1:-1]
+    return value
+
+
+def _split_front_matter(text: str) -> tuple[dict[str, Any], str]:
+    lines = text.replace("\r\n", "\n").split("\n")
+    if not lines or lines[0].strip() != "---":
+        return {}, "\n".join(lines)
+
+    try:
+        end = next(index for index in range(1, len(lines)) if lines[index].strip() == "---")
+    except StopIteration:
+        return {}, "\n".join(lines)
+
+    metadata: dict[str, Any] = {}
+    active_list: str | None = None
+    for line in lines[1:end]:
+        stripped = line.strip()
+        if active_list and stripped.startswith("-"):
+            metadata[active_list].append(_scalar(stripped[1:]))
+            continue
+        active_list = None
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "sources" and not value:
+            metadata[key] = []
+            active_list = key
+        elif key == "tags" and value.startswith("[") and value.endswith("]"):
+            raw_tags = next(csv.reader([value[1:-1]], skipinitialspace=True), [])
+            metadata[key] = [_scalar(tag) for tag in raw_tags if _scalar(tag)]
+        else:
+            metadata[key] = _scalar(value)
+    return metadata, "\n".join(lines[end + 1 :]).lstrip("\n")
+
+
+def _note_document(path: Path, include_content: bool = False) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        text = handle.read(MAX_NOTE_READ_CHARS + 1)
+    truncated = len(text) > MAX_NOTE_READ_CHARS
+    text = text[:MAX_NOTE_READ_CHARS]
+    metadata, body = _split_front_matter(text)
+
+    heading = re.search(r"^#\s+(.+?)\s*$", body, flags=re.MULTILINE)
+    title = str(metadata.get("title") or (heading.group(1) if heading else path.stem))
+    if heading and heading.start() == 0 and heading.group(1).strip() == title.strip():
+        body = body[heading.end() :].lstrip("\n")
+
+    plain = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", body)
+    plain = re.sub(r"[`*_>#~-]+", " ", plain)
+    excerpt = " ".join(plain.split())
+    if len(excerpt) > 220:
+        excerpt = excerpt[:217].rsplit(" ", 1)[0] + "..."
+
+    stat = path.stat()
+    result: dict[str, Any] = {
+        "filename": path.name,
+        "title": title,
+        "created_at": metadata.get("created") or datetime.fromtimestamp(
+            stat.st_ctime, timezone.utc
+        ).isoformat(),
+        "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        "tags": metadata.get("tags") if isinstance(metadata.get("tags"), list) else [],
+        "sources": metadata.get("sources") if isinstance(metadata.get("sources"), list) else [],
+        "excerpt": excerpt,
+        "size_bytes": stat.st_size,
+    }
+    if include_content:
+        result["content"] = body
+        result["truncated"] = truncated
+    return result
+
+
+def list_note_documents(limit: int = 100) -> list[dict[str, Any]]:
+    root = _notes_dir()
+    files = [
+        path
+        for path in root.glob("*.md")
+        if path.is_file() and not path.is_symlink() and path.resolve().parent == root
+    ]
+    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return [_note_document(path) for path in files[: max(1, min(int(limit), 100))]]
+
+
+def read_note_document(filename: str) -> dict[str, Any]:
+    path = _resolve(filename)
+    if not path.is_file():
+        raise FileNotFoundError(path.name)
+    return _note_document(path, include_content=True)
 
 
 def _create_preview(

@@ -247,6 +247,40 @@
                 <li><span class="skeleton" style="width: 62%"></span></li>
                 <li><span class="skeleton" style="width: 70%"></span></li>
               </ul>
+              <details id="notes-disclosure" class="notes-disclosure">
+                <summary class="note-trigger">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-note" /></svg>
+                  <span class="conn-name">Notes</span>
+                  <span id="note-state" class="conn-state">Loading</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="marker"><use href="#i-chevron" /></svg>
+                </summary>
+                <div class="note-details">
+                  <div class="note-details-head">
+                    <h3>Local notes</h3>
+                    <span id="note-overview"></span>
+                  </div>
+                  <div id="note-list" class="note-list" aria-live="polite">
+                    <p class="note-empty">Loading notes…</p>
+                  </div>
+                </div>
+              </details>
+              <details id="schedules-disclosure" class="schedules-disclosure">
+                <summary class="schedule-trigger">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-history" /></svg>
+                  <span class="conn-name">Schedules</span>
+                  <span id="schedule-state" class="conn-state">Loading</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" class="marker"><use href="#i-chevron" /></svg>
+                </summary>
+                <div class="schedule-details">
+                  <div class="schedule-details-head">
+                    <h3>Recurring tasks</h3>
+                    <span id="schedule-overview"></span>
+                  </div>
+                  <div id="schedule-list" class="schedule-list" aria-live="polite">
+                    <p class="schedule-empty">Loading schedules…</p>
+                  </div>
+                </div>
+              </details>
             </div>
           </details>
           <div class="account">
