@@ -38,6 +38,11 @@ const DjinVoice = (() => {
   let currentAudio = null;
   let abortListening = false;
 
+  function apiFetch(resource, options) {
+    const client = window.DjinAuth && window.DjinAuth.fetch;
+    return client ? client(resource, options) : fetch(resource, options);
+  }
+
   // ---------------------------------------------------------------- text -> speech
 
   function toSpeech(markdown) {
@@ -124,7 +129,7 @@ const DjinVoice = (() => {
   }
 
   async function speakServer(text) {
-    const response = await fetch("/api/voice/speak", {
+    const response = await apiFetch("/api/voice/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -332,7 +337,7 @@ const DjinVoice = (() => {
     body.append("audio", blob, "speech.webm");
     body.append("language", state.config.language || "en-US");
     try {
-      const response = await fetch("/api/voice/transcribe", { method: "POST", body });
+      const response = await apiFetch("/api/voice/transcribe", { method: "POST", body });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || `transcription failed (${response.status})`);
       submitTranscript(data.text || "");
@@ -480,7 +485,7 @@ const DjinVoice = (() => {
   async function init(callbacks) {
     Object.assign(hooks, callbacks);
     try {
-      const response = await fetch("/api/voice/config");
+      const response = await apiFetch("/api/voice/config");
       state.config = await response.json();
     } catch {
       return;
@@ -551,8 +556,19 @@ const DjinVoice = (() => {
     if (!value) stopSpeaking();
   }
 
+  function deactivate() {
+    stopSpeaking();
+    if (state.listening) stopListening(true);
+    else releaseMic();
+    setHandsFree(false);
+    state.voiceTurn = false;
+    state.turnOpen = false;
+    setStatus("idle", "");
+  }
+
   return {
     init,
+    deactivate,
     handleEvent,
     turnEnded,
     setVoiceTurn,

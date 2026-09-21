@@ -12,12 +12,39 @@ const modelCard = document.getElementById("model-card");
 const connections = document.getElementById("connections");
 const toolList = document.getElementById("tool-list");
 const toolCount = document.getElementById("tool-count");
+const appShell = document.getElementById("app-shell");
+const authView = document.getElementById("auth-view");
+const authForm = document.getElementById("auth-form");
+const authTitle = document.getElementById("auth-title");
+const authLead = document.getElementById("auth-lead");
+const authKicker = document.getElementById("auth-kicker");
+const authUsername = document.getElementById("auth-username");
+const authPassword = document.getElementById("auth-password");
+const authPasswordHint = document.getElementById("auth-password-hint");
+const authConfirm = document.getElementById("auth-confirm");
+const authConfirmHint = document.getElementById("auth-confirm-hint");
+const authConfirmField = document.getElementById("auth-confirm-field");
+const passwordToggle = document.getElementById("toggle-password");
+const confirmToggle = document.getElementById("toggle-confirm");
+const authError = document.getElementById("auth-error");
+const authSubmit = document.getElementById("auth-submit");
+const authSubmitLabel = authSubmit.querySelector(".label");
+const authProvision = document.getElementById("auth-provision");
+const authProvisionStatus = document.getElementById("auth-provision-status");
+const checkOwnerButton = document.getElementById("check-owner");
+const authFootnote = document.getElementById("auth-footnote");
+const accountName = document.getElementById("account-name");
+const accountRole = document.getElementById("account-role");
+const logoutButton = document.getElementById("logout");
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+const nativeFetch = window.fetch.bind(window);
 
 let conversationId = null;
 let busy = false;
 let suggestions = [];
+let authMode = "login";
+let appStarted = false;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -35,6 +62,120 @@ function icon(name) {
   svg.appendChild(use);
   return svg;
 }
+
+function responseError(data, fallback) {
+  if (typeof data.detail === "string") return data.detail;
+  if (Array.isArray(data.detail) && data.detail.length) {
+    return data.detail[0].msg;
+  }
+  return fallback;
+}
+
+function setPasswordVisibility(inputNode, button, visible, subject = "password") {
+  inputNode.type = visible ? "text" : "password";
+  const label = `${visible ? "Hide" : "Show"} ${subject}`;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  button.querySelector("use").setAttribute("href", visible ? "#i-eye-off" : "#i-eye");
+}
+
+function updatePasswordFeedback() {
+  if (authMode !== "register") return;
+  const meetsLength = authPassword.value.length >= 12;
+  authPasswordHint.textContent = meetsLength
+    ? "Length requirement met."
+    : "Use at least 12 characters.";
+  authPasswordHint.className = `field-hint${meetsLength ? " is-valid" : ""}`;
+
+  const confirmation = authConfirm.value;
+  const matches = confirmation && confirmation === authPassword.value;
+  authConfirmHint.textContent = !confirmation
+    ? "Re-enter the same password."
+    : matches ? "Passwords match." : "Passwords do not match.";
+  authConfirmHint.className = `field-hint${confirmation ? matches ? " is-valid" : " is-invalid" : ""}`;
+}
+
+function showAuth(registrationRequired, message = "") {
+  authMode = registrationRequired ? "register" : "login";
+  if (appStarted) DjinVoice.deactivate();
+  authView.dataset.mode = authMode;
+  appShell.classList.add("hidden");
+  authView.classList.remove("hidden");
+  authForm.classList.remove("hidden");
+  authProvision.classList.add("hidden");
+  authFootnote.classList.remove("hidden");
+  authTitle.textContent = registrationRequired ? "Create your owner account" : "Sign in";
+  authKicker.textContent = registrationRequired ? "First run" : "Protected workspace";
+  authLead.textContent = registrationRequired
+    ? "Set the credentials you will use on this machine."
+    : "Use your owner credentials to continue.";
+  authConfirmField.classList.toggle("hidden", !registrationRequired);
+  authConfirm.required = registrationRequired;
+  authPassword.minLength = registrationRequired ? 12 : 1;
+  authPassword.autocomplete = registrationRequired ? "new-password" : "current-password";
+  authSubmitLabel.textContent = registrationRequired ? "Create account" : "Sign in";
+  authError.textContent = message;
+  authForm.reset();
+  setPasswordVisibility(authPassword, passwordToggle, false);
+  setPasswordVisibility(authConfirm, confirmToggle, false, "password confirmation");
+  authPasswordHint.textContent = registrationRequired
+    ? "Use at least 12 characters."
+    : "Enter your account password.";
+  authPasswordHint.className = "field-hint";
+  authConfirmHint.textContent = "Re-enter the same password.";
+  authConfirmHint.className = "field-hint";
+  requestAnimationFrame(() => authUsername.focus());
+}
+
+function showProvisioning(message = "") {
+  authMode = "provision";
+  if (appStarted) DjinVoice.deactivate();
+  authView.dataset.mode = authMode;
+  appShell.classList.add("hidden");
+  authView.classList.remove("hidden");
+  authForm.classList.add("hidden");
+  authProvision.classList.remove("hidden");
+  authFootnote.classList.add("hidden");
+  authKicker.textContent = "Host setup required";
+  authTitle.textContent = "Create the owner locally";
+  authLead.textContent = "Browser account creation is disabled through this address.";
+  authProvisionStatus.textContent = message;
+  requestAnimationFrame(() => checkOwnerButton.focus());
+}
+
+function setAuthBusy(value) {
+  for (const control of authForm.querySelectorAll("input, button")) control.disabled = value;
+  authForm.setAttribute("aria-busy", String(value));
+  authSubmitLabel.textContent = value
+    ? authMode === "register" ? "Creating…" : "Signing in…"
+    : authMode === "register" ? "Create account" : "Sign in";
+}
+
+async function apiFetch(resource, options = {}) {
+  const response = await nativeFetch(resource, { credentials: "same-origin", ...options });
+  if (response.status === 401) showAuth(false, "Your session expired. Sign in again.");
+  return response;
+}
+
+window.DjinAuth = { fetch: apiFetch };
+
+passwordToggle.addEventListener("click", () => {
+  setPasswordVisibility(authPassword, passwordToggle, authPassword.type === "password");
+  authPassword.focus();
+});
+
+confirmToggle.addEventListener("click", () => {
+  setPasswordVisibility(
+    authConfirm,
+    confirmToggle,
+    authConfirm.type === "password",
+    "password confirmation"
+  );
+  authConfirm.focus();
+});
+
+authPassword.addEventListener("input", updatePasswordFeedback);
+authConfirm.addEventListener("input", updatePasswordFeedback);
 
 function scrollToEnd() {
   chat.scrollTop = chat.scrollHeight;
@@ -238,7 +379,7 @@ function handleEvent(event) {
 }
 
 async function streamRequest(url, payload) {
-  const response = await fetch(url, {
+  const response = await apiFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -410,7 +551,7 @@ function armDelete(row, session) {
 
 async function deleteSession(id) {
   try {
-    const response = await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+    const response = await apiFetch(`/api/conversations/${id}`, { method: "DELETE" });
     if (!response.ok) throw new Error(`Could not delete the session (${response.status})`);
   } catch (error) {
     addMessage("error", error.message);
@@ -471,7 +612,7 @@ function replay(messages) {
 async function loadSession(id) {
   if (busy) return;
   try {
-    const response = await fetch(`/api/conversations/${id}`);
+    const response = await apiFetch(`/api/conversations/${id}`);
     if (!response.ok) throw new Error(`Could not open that session (${response.status})`);
     const data = await response.json();
     conversationId = id;
@@ -487,7 +628,8 @@ async function loadSession(id) {
 
 async function loadSessions() {
   try {
-    const response = await fetch("/api/conversations?limit=40");
+    const response = await apiFetch("/api/conversations?limit=40");
+    if (!response.ok) throw new Error();
     renderSessions(await response.json());
   } catch {
     sessionList.replaceChildren(el("li", "session-empty", "Sessions unavailable."));
@@ -602,7 +744,8 @@ function renderEmptyState(prompts) {
 
 async function loadStatus() {
   try {
-    const response = await fetch("/api/status");
+    const response = await apiFetch("/api/status");
+    if (!response.ok) throw new Error();
     const data = await response.json();
     renderSession(data);
     suggestions = suggestionsFor(data);
@@ -614,9 +757,107 @@ async function loadStatus() {
   }
 }
 
-loadStatus();
-loadSessions();
-DjinVoice.init({ send: sendMessage, isBusy: () => busy });
-autoGrow();
-input.focus();
+async function enterApp(user) {
+  accountName.textContent = user.username;
+  accountRole.textContent = user.role;
+  authView.classList.add("hidden");
+  appShell.classList.remove("hidden");
+
+  if (!appStarted) {
+    appStarted = true;
+    DjinVoice.init({ send: sendMessage, isBusy: () => busy });
+    autoGrow();
+  }
+  await Promise.all([loadStatus(), loadSessions()]);
+  input.focus();
+}
+
+authForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  authError.textContent = "";
+  if (authMode === "register" && authPassword.value !== authConfirm.value) {
+    authError.textContent = "Passwords do not match.";
+    authConfirm.focus();
+    return;
+  }
+
+  setAuthBusy(true);
+  try {
+    const endpoint = authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+    const response = await nativeFetch(endpoint, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: authUsername.value,
+        password: authPassword.value,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = responseError(data, `Sign-in failed (${response.status})`);
+      if (authMode === "register" && (response.status === 403 || response.status === 409)) {
+        await initialize(response.status === 409 ? "The owner account is ready. Sign in." : message);
+        return;
+      }
+      throw new Error(message);
+    }
+    await enterApp(data.user);
+  } catch (error) {
+    authError.textContent = error.message;
+  } finally {
+    setAuthBusy(false);
+  }
+});
+
+logoutButton.addEventListener("click", async () => {
+  logoutButton.disabled = true;
+  try {
+    const response = await nativeFetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+    });
+    if (response.status === 401) {
+      showAuth(false, "Your session has ended. Sign in again.");
+      return;
+    }
+    if (!response.ok) throw new Error(`Sign-out failed (${response.status})`);
+    showAuth(false);
+  } catch (error) {
+    statusBar.replaceChildren(el("span", "pill is-bad", error.message));
+  } finally {
+    logoutButton.disabled = false;
+  }
+});
+
+checkOwnerButton.addEventListener("click", async () => {
+  checkOwnerButton.disabled = true;
+  authProvisionStatus.textContent = "Checking…";
+  await initialize("Owner account not found yet.");
+  checkOwnerButton.disabled = false;
+});
+
+async function initialize(message = "") {
+  try {
+    const setupResponse = await nativeFetch("/api/auth/setup", { credentials: "same-origin" });
+    if (!setupResponse.ok) throw new Error(`Setup check failed (${setupResponse.status})`);
+    const setup = await setupResponse.json();
+    if (setup.registration_required) {
+      if (setup.registration_allowed) showAuth(true, message);
+      else showProvisioning(message);
+      return;
+    }
+
+    const meResponse = await nativeFetch("/api/auth/me", { credentials: "same-origin" });
+    if (!meResponse.ok) {
+      showAuth(false, message);
+      return;
+    }
+    await enterApp(await meResponse.json());
+  } catch (error) {
+    showAuth(false, error.message);
+  }
+}
+
+initialize();
 
