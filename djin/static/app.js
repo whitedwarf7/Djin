@@ -11,6 +11,10 @@ const sessionHeading = document.getElementById("session-title");
 const modelName = document.getElementById("model-name");
 const connections = document.getElementById("connections");
 const appShell = document.getElementById("app-shell");
+const sessionRail = document.getElementById("session-rail");
+const sessionMenuButton = document.getElementById("session-menu");
+const sessionMenuIcon = sessionMenuButton.querySelector("use");
+const sessionBackdrop = document.getElementById("session-backdrop");
 const authView = document.getElementById("auth-view");
 const authForm = document.getElementById("auth-form");
 const authTitle = document.getElementById("auth-title");
@@ -477,6 +481,7 @@ input.addEventListener("keydown", (event) => {
 
 const sessionList = document.getElementById("session-list");
 const newSessionButton = document.getElementById("new-session");
+const mobileSessions = window.matchMedia("(max-width: 760px)");
 const toolRisk = new Map();
 const RELATIVE = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 const STEPS = [
@@ -487,6 +492,36 @@ const STEPS = [
   ["month", 2_592_000_000],
   ["year", 31_536_000_000],
 ];
+
+function setSessionDrawer(open) {
+  const expanded = mobileSessions.matches && open;
+  if (!expanded && sessionRail.contains(document.activeElement)) {
+    sessionMenuButton.focus();
+  }
+
+  appShell.classList.toggle("sessions-open", expanded);
+  sessionMenuButton.setAttribute("aria-expanded", String(expanded));
+  sessionMenuButton.setAttribute("aria-label", expanded ? "Close sessions" : "Open sessions");
+  sessionMenuButton.title = expanded ? "Close sessions" : "Open sessions";
+  sessionMenuIcon.setAttribute("href", expanded ? "#i-close" : "#i-menu");
+  sessionBackdrop.tabIndex = expanded ? 0 : -1;
+
+  if (mobileSessions.matches) {
+    sessionRail.inert = !expanded;
+    sessionRail.setAttribute("aria-hidden", String(!expanded));
+  } else {
+    sessionRail.inert = false;
+    sessionRail.removeAttribute("aria-hidden");
+  }
+}
+
+function closeSessionDrawer() {
+  setSessionDrawer(false);
+}
+
+function syncSessionDrawer() {
+  setSessionDrawer(appShell.classList.contains("sessions-open"));
+}
 
 function relativeTime(iso) {
   const then = Date.parse(iso);
@@ -630,6 +665,7 @@ async function loadSession(id) {
     replay(data.messages);
     renderApprovals(data.pending);
     await loadSessions();
+    closeSessionDrawer();
     input.focus();
   } catch (error) {
     addMessage("error", error.message);
@@ -646,7 +682,29 @@ async function loadSessions() {
   }
 }
 
-newSessionButton.addEventListener("click", startNewSession);
+sessionMenuButton.addEventListener("click", () => {
+  const opening = !appShell.classList.contains("sessions-open");
+  setSessionDrawer(opening);
+  if (opening) {
+    requestAnimationFrame(() => {
+      (sessionList.querySelector(".session-open") || newSessionButton).focus();
+    });
+  }
+});
+
+sessionBackdrop.addEventListener("click", closeSessionDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && appShell.classList.contains("sessions-open")) {
+    closeSessionDrawer();
+  }
+});
+mobileSessions.addEventListener("change", syncSessionDrawer);
+syncSessionDrawer();
+
+newSessionButton.addEventListener("click", () => {
+  startNewSession();
+  closeSessionDrawer();
+});
 
 // ------------------------------------------------------------------ session panel
 
