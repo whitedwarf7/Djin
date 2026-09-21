@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     notes_dir: Path = PROJECT_ROOT / "data" / "notes"
     encryption_key: str = ""
 
+    jwt_secret: str = ""
+    jwt_expire_minutes: int = Field(default=480, ge=5, le=10_080)
+    auth_cookie_secure: bool = False
+
     auto_approve_write: bool = True
 
     host: str = "127.0.0.1"
@@ -65,6 +69,13 @@ class Settings(BaseSettings):
     @classmethod
     def _absolute(cls, value: Path) -> Path:
         return value if value.is_absolute() else (PROJECT_ROOT / value).resolve()
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _strong_jwt_secret(cls, value: str) -> str:
+        if value and len(value.encode()) < 32:
+            raise ValueError("DJIN_JWT_SECRET must be at least 32 bytes.")
+        return value
 
     @property
     def db_path(self) -> Path:

@@ -10,6 +10,15 @@ from typing import Any, Iterator
 from djin.config import get_settings
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    username      TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+    is_active     INTEGER NOT NULL DEFAULT 1,
+    created_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
     id          TEXT PRIMARY KEY,
     title       TEXT,
@@ -104,6 +113,54 @@ def init_db() -> None:
     get_settings().ensure_dirs()
     with connect() as conn:
         conn.executescript(SCHEMA)
+
+
+def count_users() -> int:
+    with connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()
+    return int(row["count"])
+
+
+def create_first_user(username: str, password_hash: str) -> dict[str, Any]:
+    user_id = uuid.uuid4().hex
+    created_at = utcnow()
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None:
+            raise ValueError("The owner account has already been created.")
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, role, created_at)"
+            " VALUES (?, ?, ?, 'admin', ?)",
+            (user_id, username, password_hash, created_at),
+        )
+    return {
+        "id": user_id,
+        "username": username,
+        "password_hash": password_hash,
+        "role": "admin",
+        "is_active": True,
+        "created_at": created_at,
+    }
+
+
+def _row_to_user(row: sqlite3.Row) -> dict[str, Any]:
+    user = dict(row)
+    user["is_active"] = bool(user["is_active"])
+    return user
+
+
+def get_user_by_username(username: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ? COLLATE NOCASE", (username,)
+        ).fetchone()
+    return _row_to_user(row) if row else None
+
+
+def get_user_by_id(user_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return _row_to_user(row) if row else None
 
 
 def create_conversation(title: str = "New conversation") -> str:

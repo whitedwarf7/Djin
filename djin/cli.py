@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import sys
 
+from djin import auth
 from djin.config import get_settings
 from djin.storage import db, secrets
 
@@ -52,9 +54,28 @@ def _status() -> int:
 def _serve() -> int:
     from djin.server import run
 
+    db.init_db()
     settings = get_settings()
     print(f"Djin is running at http://{settings.host}:{settings.port}")
     run()
+    return 0
+
+
+def _create_owner() -> int:
+    db.init_db()
+    if db.count_users() != 0:
+        print("The owner account has already been created.")
+        return 1
+
+    username = auth.normalize_username(input("Owner username: "))
+    password = getpass.getpass("Password (12-128 characters): ")
+    confirmation = getpass.getpass("Confirm password: ")
+    auth.validate_new_password(password)
+    if password != confirmation:
+        raise ValueError("Passwords do not match.")
+
+    db.create_first_user(username, auth.hash_password(password))
+    print(f"Created owner account '{username}'.")
     return 0
 
 
@@ -64,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("serve", help="Start the local web UI")
     sub.add_parser("status", help="Show configuration and connection status")
+    sub.add_parser("create-owner", help="Create the owner account interactively")
 
     login = sub.add_parser("login", help="Connect an account")
     login.add_argument("service", choices=["google"])
@@ -77,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
             return _serve()
         if args.command == "status":
             return _status()
+        if args.command == "create-owner":
+            return _create_owner()
         if args.command == "login":
             return _login()
         if args.command == "logout":

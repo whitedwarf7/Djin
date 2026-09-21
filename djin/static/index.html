@@ -88,10 +88,114 @@
         <path d="M6.75 7v11.4A1.6 1.6 0 0 0 8.35 20h7.3a1.6 1.6 0 0 0 1.6-1.6V7" />
         <path d="M10.5 10.8v5.4M13.5 10.8v5.4" />
       </g>
+      <g id="i-user" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="8" r="3.5" />
+        <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+      </g>
+      <g id="i-logout" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 5H6.5A2.5 2.5 0 0 0 4 7.5v9A2.5 2.5 0 0 0 6.5 19H10" />
+        <path d="M14.5 8.5 18 12l-3.5 3.5M9 12h9" />
+      </g>
+      <g id="i-eye" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12s3.2-5.5 9-5.5 9 5.5 9 5.5-3.2 5.5-9 5.5S3 12 3 12Z" />
+        <circle cx="12" cy="12" r="2.5" />
+      </g>
+      <g id="i-eye-off" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m4 4 16 16M9.7 6.8A9.3 9.3 0 0 1 12 6.5c5.8 0 9 5.5 9 5.5a13 13 0 0 1-2.2 2.8M14.4 14.5a3.2 3.2 0 0 1-4.8-4.2M6.6 8.1A13.8 13.8 0 0 0 3 12s3.2 5.5 9 5.5a9.3 9.3 0 0 0 2.4-.3" />
+      </g>
+      <g id="i-lock" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8.5 10V7.5a3.5 3.5 0 0 1 7 0V10" />
+      </g>
     </defs>
   </svg>
 
-  <div class="shell">
+  <main id="auth-view" class="auth-view" aria-labelledby="auth-title">
+    <div class="auth-layout">
+      <section class="auth-intro" aria-label="Djin local workspace">
+        <div class="auth-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><use href="#i-lamp" /></svg>
+          </span>
+          <span class="brand-text">
+            <span class="brand-name">Djin</span>
+            <span class="brand-sub">personal assistant</span>
+          </span>
+        </div>
+
+        <div class="auth-statement">
+          <span class="auth-rule" aria-hidden="true"></span>
+          <h2>Your workspace.<br /><span>Kept close.</span></h2>
+          <p>One account protects your conversations, approvals, and connected services.</p>
+        </div>
+
+        <div class="auth-assurance">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lock" /></svg>
+          <span><strong>Local access</strong><small>127.0.0.1</small></span>
+        </div>
+      </section>
+
+      <section class="auth-panel">
+        <div class="auth-panel-inner">
+          <header class="auth-header">
+            <p id="auth-kicker" class="auth-kicker">Protected workspace</p>
+            <h1 id="auth-title">Sign in</h1>
+            <p id="auth-lead" class="auth-lead">Use your owner credentials to continue.</p>
+          </header>
+
+          <form id="auth-form" class="auth-form">
+            <div class="auth-field">
+              <label for="auth-username">Username</label>
+              <input id="auth-username" name="username" type="text" minlength="3" maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*" title="Use 3–64 letters, numbers, dots, hyphens, or underscores." autocomplete="username" aria-describedby="auth-username-hint" required />
+              <p id="auth-username-hint" class="field-hint">Letters, numbers, dots, hyphens, or underscores.</p>
+            </div>
+
+            <div class="auth-field">
+              <label for="auth-password">Password</label>
+              <div class="auth-input-wrap">
+                <input id="auth-password" name="password" type="password" maxlength="128" autocomplete="current-password" aria-describedby="auth-password-hint" required />
+                <button type="button" id="toggle-password" class="password-toggle" title="Show password" aria-label="Show password">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye" /></svg>
+                </button>
+              </div>
+              <p id="auth-password-hint" class="field-hint">Enter your account password.</p>
+            </div>
+
+            <div id="auth-confirm-field" class="auth-field hidden">
+              <label for="auth-confirm">Confirm password</label>
+              <div class="auth-input-wrap">
+                <input id="auth-confirm" name="confirm-password" type="password" maxlength="128" autocomplete="new-password" aria-describedby="auth-confirm-hint" />
+                <button type="button" id="toggle-confirm" class="password-toggle" title="Show confirmation" aria-label="Show confirmation">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye" /></svg>
+                </button>
+              </div>
+              <p id="auth-confirm-hint" class="field-hint" aria-live="polite">Re-enter the same password.</p>
+            </div>
+
+            <p id="auth-error" class="auth-error" role="alert" aria-live="assertive"></p>
+            <button id="auth-submit" class="auth-submit" type="submit">
+              <span class="label">Sign in</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chevron" /></svg>
+            </button>
+          </form>
+
+          <div id="auth-provision" class="auth-provision hidden">
+            <p>Run this command on the machine hosting Djin. Your password is entered privately in that terminal.</p>
+            <code>python -m djin.cli create-owner</code>
+            <p id="auth-provision-status" class="field-hint" role="status"></p>
+            <button id="check-owner" type="button" class="auth-secondary">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-history" /></svg>
+              <span>Check again</span>
+            </button>
+          </div>
+
+          <p id="auth-footnote" class="auth-footnote"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lock" /></svg>Your signed-in session stays in this browser.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div id="app-shell" class="shell hidden">
     <aside class="rail" aria-label="Session details">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">
@@ -154,7 +258,17 @@
           <span class="session-label">Session</span>
           <span id="session-id" class="session-id">new</span>
         </div>
-        <div id="status" class="status" role="status"></div>
+        <div class="topbar-actions">
+          <div id="status" class="status" role="status"></div>
+          <div class="account">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-user" /></svg>
+            <span id="account-name" class="account-name"></span>
+            <span id="account-role" class="account-role"></span>
+            <button type="button" id="logout" class="sign-out" title="Sign out" aria-label="Sign out">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-logout" /></svg>
+            </button>
+          </div>
+        </div>
       </header>
 
       <section id="chat" class="transcript" aria-live="polite" aria-label="Conversation"></section>

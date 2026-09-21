@@ -13,6 +13,7 @@ ntfy delivery, scheduled summaries also go to that service.
 - [How it works](#how-it-works)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
+- [Authentication](#authentication)
 - [Configuration](#configuration)
 - [Running Djin](#running-djin)
 - [Talking to Djin](#talking-to-djin)
@@ -90,8 +91,38 @@ python -m djin.cli serve    # start Djin
 
 Open <http://127.0.0.1:8765>.
 
+On the first visit, create the owner username and password directly in the browser. Registration
+is accepted only from the local Djin address and closes as soon as that account exists; subsequent
+visits show the sign-in screen.
+
 The notes tools work immediately. Gmail, Calendar and web search each need the extra setup
 below — add only the ones you want.
+
+## Authentication
+
+Djin accepts first-run registration only when both the client and page origin are loopback,
+hashes the owner password with Argon2id, and issues an eight-hour JWT after a successful sign-in.
+The browser receives the token in an `HttpOnly`, `SameSite=Strict` cookie. API clients can instead
+send the returned token as a bearer credential:
+
+```powershell
+$login = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/auth/login `
+  -ContentType application/json `
+  -Body '{"username":"owner","password":"your password"}'
+
+Invoke-RestMethod -Uri http://127.0.0.1:8765/api/status `
+  -Headers @{ Authorization = "Bearer $($login.access_token)" }
+```
+
+All application API routes require authentication. The audit log additionally requires the
+`admin` role; the first owner account receives that role.
+
+If Djin is deliberately hosted behind a reverse proxy and the local setup page is unavailable,
+create the owner without putting a password in shell history:
+
+```powershell
+python -m djin.cli create-owner
+```
 
 ## Configuration
 
@@ -278,6 +309,9 @@ instance, so audio need not leave the machine.
 | `DJIN_TTS_VOICE` | `alloy` | Synthesised voice name |
 | `DJIN_VOICE_LANGUAGE` | `en-US` | Recognition and playback language |
 | `DJIN_HOST` / `DJIN_PORT` | `127.0.0.1` / `8765` | Server binding |
+| `DJIN_JWT_EXPIRE_MINUTES` | `480` | Access-token lifetime, from 5 minutes to 7 days |
+| `DJIN_JWT_SECRET` | auto | JWT signing secret; generated into `data/auth.key` if empty |
+| `DJIN_AUTH_COOKIE_SECURE` | `false` | Set `true` when the UI is served over HTTPS |
 | `DJIN_ENCRYPTION_KEY` | auto | Fernet key; generated into `data/secret.key` if empty |
 
 ## Running Djin
@@ -286,6 +320,7 @@ instance, so audio need not leave the machine.
 | --- | --- |
 | `python -m djin.cli serve` | Start the web UI on <http://127.0.0.1:8765> |
 | `python -m djin.cli status` | Show provider, model and which accounts are connected |
+| `python -m djin.cli create-owner` | Interactively create the owner when local browser setup is unavailable |
 | `python -m djin.cli login google` | Authorise Gmail and Calendar |
 | `python -m djin.cli logout google` | Delete the stored Google token |
 
@@ -347,7 +382,7 @@ appears showing exactly what will happen — recipients, times, attendees, conte
 until you click **Approve**.
 
 Every tool call is recorded in an audit log with its arguments, risk level, approval status and
-outcome, readable at `GET http://127.0.0.1:8765/api/audit`.
+outcome. The owner can read it at `GET http://127.0.0.1:8765/api/audit`.
 
 ## Project structure
 
@@ -355,6 +390,7 @@ outcome, readable at `GET http://127.0.0.1:8765/api/audit`.
 Djin/
 ├─ djin/
 │  ├─ agent.py              # tool-calling loop, approval pause and resume
+│  ├─ auth.py               # Argon2 password verification and JWT authorization
 │  ├─ cli.py                # serve / status / login / logout
 │  ├─ config.py             # settings loaded from .env
 │  ├─ llm.py                # OpenAI-compatible client (OpenAI + OpenRouter)
@@ -419,6 +455,13 @@ Open Djin at <http://127.0.0.1:8765> and allow the permission prompt.
 
 - OAuth tokens are encrypted at rest with Fernet. The key lives in `data/secret.key`, which is
   git-ignored; losing it just means signing in again.
+- Passwords are stored only as Argon2id hashes. JWTs are signed with `DJIN_JWT_SECRET` or a random
+  key generated in the git-ignored `data/auth.key` file.
+- First-run browser registration is restricted to a loopback client, host and origin. Remote
+  deployments can create the owner interactively with `python -m djin.cli create-owner`.
+  Five failed sign-in attempts from one source trigger a one-minute limit.
+- Browser JWTs use an `HttpOnly`, `SameSite=Strict` cookie. Logging out removes that cookie; bearer
+  tokens remain valid until their configured expiry.
 - With the default voice settings, audio is captured and played entirely inside the browser and
   is never uploaded. Setting `DJIN_STT_PROVIDER` or `DJIN_TTS_PROVIDER` to `openai` sends audio
   to `DJIN_VOICE_BASE_URL`.
@@ -430,7 +473,9 @@ Open Djin at <http://127.0.0.1:8765> and allow the permission prompt.
 - `fetch_url` refuses private, loopback and link-local addresses and re-checks every redirect
   hop, so the model cannot reach your router or localhost services.
 - The chat UI renders all text as plain text, so retrieved content cannot inject markup.
-- The server binds to `127.0.0.1` and has **no authentication**. Do not expose the port.
+- The server binds to `127.0.0.1` by default. Do not expose it directly to the internet; use HTTPS,
+  set `DJIN_AUTH_COOKIE_SECURE=true`, and place it behind a hardened reverse proxy if remote access
+  is required.
 - To revoke access completely, run the `logout` command and also remove the app at
   [Google permissions](https://myaccount.google.com/permissions).
 
