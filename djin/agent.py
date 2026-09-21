@@ -109,8 +109,16 @@ def _api_messages(
     return messages
 
 
-def _tool_message(tool_call_id: str, name: str, content: str) -> dict[str, Any]:
-    return {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
+def _tool_message(
+    tool_call_id: str, name: str, content: str, *, status: str
+) -> dict[str, Any]:
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "name": name,
+        "content": content,
+        "_status": status,
+    }
 
 
 def _execute(
@@ -160,14 +168,20 @@ def _handle_tool_call(
     except (json.JSONDecodeError, ValueError) as exc:
         db.append_message(
             conversation_id,
-            _tool_message(call_id, name, f"Could not parse tool arguments: {exc}"),
+            _tool_message(
+                call_id,
+                name,
+                f"Could not parse tool arguments: {exc}",
+                status="error",
+            ),
         )
         return ToolActivity(name, "unknown", "error", "n/a", "bad arguments"), False
 
     spec = get_tool(name)
     if spec is None:
         db.append_message(
-            conversation_id, _tool_message(call_id, name, f"Unknown tool '{name}'.")
+            conversation_id,
+            _tool_message(call_id, name, f"Unknown tool '{name}'.", status="error"),
         )
         return ToolActivity(name, "unknown", "error", "n/a", "unknown tool"), False
 
@@ -176,7 +190,10 @@ def _handle_tool_call(
             f"Tool blocked by the unattended-run policy: {spec.name} has"
             f" {spec.risk.value} risk, but this run allows {risk_ceiling.value} risk."
         )
-        db.append_message(conversation_id, _tool_message(call_id, spec.name, content))
+        db.append_message(
+            conversation_id,
+            _tool_message(call_id, spec.name, content, status="blocked"),
+        )
         db.log_audit(
             conversation_id=conversation_id,
             tool_name=spec.name,
@@ -211,7 +228,9 @@ def _handle_tool_call(
         return ToolActivity(spec.name, spec.risk.value, "pending", "requested", preview[:200]), True
 
     content, status = _execute(spec, arguments, conversation_id, approval="auto")
-    db.append_message(conversation_id, _tool_message(call_id, spec.name, content))
+    db.append_message(
+        conversation_id, _tool_message(call_id, spec.name, content, status=status)
+    )
     return ToolActivity(spec.name, spec.risk.value, status, "auto", content[:200]), False
 
 
@@ -220,12 +239,21 @@ def _running_event(call: dict[str, Any]) -> dict[str, Any]:
     spec = get_tool(name)
     return {
         "type": "tool",
+        "tool_call_id": call.get("id"),
         "tool": name,
         "risk": spec.risk.value if spec else "unknown",
         "status": "running",
         "approval": "",
         "summary": "",
     }
+
+
+def _tool_calls_with_ids(message: dict[str, Any]) -> list[dict[str, Any]]:
+    tool_calls = message.get("tool_calls") or []
+    for call in tool_calls:
+        if not call.get("id"):
+            call["id"] = uuid.uuid4().hex
+    return tool_calls
 
 
 def _stream_loop(
@@ -264,21 +292,22 @@ def _stream_loop(
             yield {"type": "error", "message": "The model returned an empty response."}
             return
 
+        tool_calls = _tool_calls_with_ids(assistant)
         db.append_message(conversation_id, assistant)
         yield {"type": "message_end"}
 
-        tool_calls = assistant.get("tool_calls") or []
         if not tool_calls:
             return
 
         paused = False
         for call in tool_calls:
+            call_id = call["id"]
             yield _running_event(call)
             activity, needs_approval = _handle_tool_call(
                 call, conversation_id, risk_ceiling
             )
             if activity:
-                yield {"type": "tool", **vars(activity)}
+                yield {"type": "tool", "tool_call_id": call_id, **vars(activity)}
             paused = paused or needs_approval
 
         if paused:
@@ -365,9 +394,20 @@ def _stream_resolution(
     spec = get_tool(action["tool_name"])
     if spec is None:
         content = f"Unknown tool '{action['tool_name']}'."
+        status = "error"
+        yield {
+            "type": "tool",
+            "tool_call_id": action["tool_call_id"],
+            "tool": action["tool_name"],
+            "risk": action["risk"],
+            "status": status,
+            "approval": "approved" if approve else "rejected",
+            "summary": content,
+        }
     elif approve:
         yield {
             "type": "tool",
+            "tool_call_id": action["tool_call_id"],
             "tool": spec.name,
             "risk": spec.risk.value,
             "status": "running",
@@ -377,6 +417,7 @@ def _stream_resolution(
         content, status = _execute(spec, action["arguments"], conversation_id, "approved")
         yield {
             "type": "tool",
+            "tool_call_id": action["tool_call_id"],
             "tool": spec.name,
             "risk": spec.risk.value,
             "status": status,
@@ -385,6 +426,7 @@ def _stream_resolution(
         }
     else:
         content = "The user rejected this action. Do not retry it unless they ask you to."
+        status = "skipped"
         db.log_audit(
             conversation_id=conversation_id,
             tool_name=spec.name,
@@ -395,6 +437,7 @@ def _stream_resolution(
         )
         yield {
             "type": "tool",
+            "tool_call_id": action["tool_call_id"],
             "tool": spec.name,
             "risk": spec.risk.value,
             "status": "skipped",
@@ -403,7 +446,10 @@ def _stream_resolution(
         }
 
     db.append_message(
-        conversation_id, _tool_message(action["tool_call_id"], action["tool_name"], content)
+        conversation_id,
+        _tool_message(
+            action["tool_call_id"], action["tool_name"], content, status=status
+        ),
     )
 
     if db.list_pending_actions(conversation_id):

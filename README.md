@@ -16,6 +16,7 @@ ntfy delivery, scheduled summaries also go to that service.
 - [Authentication](#authentication)
 - [Configuration](#configuration)
 - [Running Djin](#running-djin)
+- [iPhone app](#iphone-app)
 - [Talking to Djin](#talking-to-djin)
 - [Things to try](#things-to-try)
 - [Available tools](#available-tools)
@@ -327,6 +328,16 @@ instance, so audio need not leave the machine.
 Stop the server with `Ctrl+C`. The status bar at the top of the UI shows a tick or a cross for
 each integration.
 
+## iPhone app
+
+The native SwiftUI client lives in [`ios`](ios). It uses the same authenticated API and keeps
+the Python service, credentials, integrations and data on your Mac. A Mac with Xcode is required
+to generate, build and run the iOS project.
+
+Follow the [Mac setup and testing guide](ios/MAC_TESTING.md) for exact simulator and physical-device
+steps. The [implementation plan](ios/PLAN.md) records the high-level roadmap and low-level
+architecture.
+
 ## Talking to Djin
 
 Above the message box are the voice controls.
@@ -402,6 +413,7 @@ Djin/
 │  ├─ storage/              # SQLite database and encrypted token vault
 │  ├─ static/               # chat and voice UI
 │  └─ tools/                # the 19 tools, grouped by service
+├─ ios/                     # native SwiftUI iPhone client and Mac test guide
 ├─ data/                    # database, notes, encryption key (git-ignored)
 ├─ .env                     # your secrets (git-ignored)
 ├─ .env.example             # template
